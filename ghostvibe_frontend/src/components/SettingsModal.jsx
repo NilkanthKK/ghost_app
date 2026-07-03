@@ -1,17 +1,11 @@
-import { useState, useEffect } from 'react';
-import { X, User, Shield, ShieldAlert, Bell, MessageSquare, Database, Trash2, Download, Check, Camera, Image, KeyRound } from 'lucide-react';
+import { useState } from 'react';
+import { User, Download, Camera } from 'lucide-react';
 import { validateUsername, validateBio, validateEmail } from '../utils/validators';
 
 export default function SettingsModal({
   onClose,
   myProfile,
   setMyProfile,
-  globalTheme,
-  setGlobalTheme,
-  lastSeenEnabled,
-  setLastSeenEnabled,
-  defaultTtl,
-  setDefaultTtl,
   linkedDevices,
   onRevokeDevice,
   myPhone,
@@ -30,10 +24,9 @@ export default function SettingsModal({
   const [privacyPhoto, setPrivacyPhoto] = useState(() => localStorage.getItem('gv_privacy_photo') || 'Everyone');
   const [privacySeen, setPrivacySeen] = useState(() => localStorage.getItem('gv_privacy_seen') || 'Everyone');
   const [privacyCalls, setPrivacyCalls] = useState(() => localStorage.getItem('gv_privacy_calls') || 'Everyone');
-  const [blockedUsersCount, setBlockedUsersCount] = useState(0);
+  const [blockedUsersCount] = useState(0);
 
   // Security States
-  const [appPin, setAppPin] = useState(() => localStorage.getItem('gv_chat_lock_pin') || '');
   const [pinChangeError, setPinChangeError] = useState('');
   const [pinSuccessMessage, setPinSuccessMessage] = useState('');
 
@@ -42,18 +35,17 @@ export default function SettingsModal({
   const [fontSize, setFontSize] = useState(() => localStorage.getItem('gv_font_size') || 'Medium');
 
   // Storage Stats
-  const [localStoreSize, setLocalStoreSize] = useState(0);
-
-  useEffect(() => {
-    // Compute simple storage metrics for storage tab
+  const [localStoreSize] = useState(() => {
     let totalChars = 0;
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       const val = localStorage.getItem(key) || '';
       totalChars += key.length + val.length;
     }
-    setLocalStoreSize(Math.round(totalChars / 1024));
-  }, []);
+    return Math.round(totalChars / 1024);
+  });
+
+
 
   const handleUpdateProfile = () => {
     setProfileMessage('');
@@ -115,7 +107,6 @@ export default function SettingsModal({
       return;
     }
     localStorage.setItem('gv_chat_lock_pin', newPin);
-    setAppPin(newPin);
     setPinSuccessMessage('🔒 Lock PIN changed successfully.');
   };
 
@@ -532,7 +523,7 @@ export default function SettingsModal({
           )}
 
           {/* NOTIFICATIONS SUB TAB */}
-          {activeTab === 'notifications' && (
+          {activeSubTab === 'notifications' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', textAlign: 'left' }}>
               <h2 style={{ margin: 0, fontSize: '1.4rem', color: '#fff' }}>Notification Options</h2>
 

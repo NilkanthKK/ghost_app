@@ -85,7 +85,7 @@ async def queue_offline_message(
     sender_id: str,
     recipient_id: str,
     payload: dict,
-    db: AsyncSession,
+    db: AsyncSession = None,
 ):
     """
     Saves an encrypted message to the database if the recipient is offline.
@@ -100,18 +100,19 @@ async def queue_offline_message(
     max_retries = 5
     for attempt in range(max_retries):
         try:
-            offline_msg = OfflineMessage(
-                sender_id=uuid.UUID(sender_id),
-                recipient_id=uuid.UUID(recipient_id),
-                encrypted_payload=json.dumps(payload)
-            )
-            db.add(offline_msg)
-            await db.commit()
-            await db.refresh(offline_msg)
-            logger.info("Database Commit OK")
-            return offline_msg
+            async with async_session() as local_db:
+                offline_msg = OfflineMessage(
+                    sender_id=uuid.UUID(sender_id),
+                    recipient_id=uuid.UUID(recipient_id),
+                    encrypted_payload=json.dumps(payload)
+                )
+                local_db.add(offline_msg)
+                await local_db.commit()
+                await local_db.refresh(offline_msg)
+                local_db.expunge(offline_msg)
+                logger.info("Database Commit OK")
+                return offline_msg
         except Exception as e:
-            await db.rollback()
             if attempt == max_retries - 1:
                 logger.error(f"Failed to queue offline message after {max_retries} attempts: {e}")
                 raise e

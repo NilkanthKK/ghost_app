@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { MessageSquarePlus, Trash2, LogOut, Search, Plus, X, User, Volume2, VolumeX, Settings } from 'lucide-react';
 import { getSoundEnabled, setSoundEnabled, playSentChime } from '../utils/audio';
 import { getRecord } from '../utils/indexed_db';
-import { hashPin } from './ChatLockModal';
+import { hashPin } from '../utils/chat_lock';
 import { validateFileUpload } from '../utils/validators';
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
@@ -23,7 +23,8 @@ export default function ChatList({
   onOpenSettings,
   lastSeenEnabled,
   unlockedChatIds = new Set(),
-  onStatusViewed
+  onStatusViewed,
+  onUnlockAllChats
 }) {
   const [newPhone, setNewPhone] = useState('');
   const [newName, setNewName] = useState('');
@@ -66,11 +67,16 @@ export default function ChatList({
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [soundOn, setSoundOn] = useState(() => getSoundEnabled());
-  const [localChats, setLocalChats] = useState([]);
+  const [localChats, setLocalChats] = useState(chats || []);
+  const [prevChats, setPrevChats] = useState(chats);
+
+  if (chats !== prevChats) {
+    setPrevChats(chats);
+    setLocalChats(chats || []);
+  }
 
   useEffect(() => {
-    if (chats && chats.length > 0) {
-      setLocalChats(chats);
+    if (localChats && localChats.length > 0) {
       return;
     }
 
@@ -94,13 +100,15 @@ export default function ChatList({
         if (localVal) {
           setLocalChats(JSON.parse(localVal));
         }
-      } catch {}
+      } catch (err) {
+        console.warn("gv_chats load error:", err);
+      }
     }
     
     if (myUserId) {
       loadData();
     }
-  }, [chats, myUserId]);
+  }, [myUserId, localChats]);
 
   // Status view modal states
   const [viewingStatusUser, setViewingStatusUser] = useState(null); // userId | null
@@ -119,7 +127,7 @@ export default function ChatList({
         onStatusViewed(viewingStatusUser, currentStory.id);
       }
     }
-  }, [viewingStatusUser, activeStoryIndex, statuses, onStatusViewed]);
+  }, [viewingStatusUser, activeStoryIndex, statuses, onStatusViewed, myUserId]);
 
   // 1. Generate unique deterministic gradient avatar based on phone number checksum
   const getDeterministicGradient = (phone) => {

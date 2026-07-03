@@ -1,18 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
-  Shield, Users, MessageSquare, Phone, Layers, ShieldAlert, Sliders, 
-  Search, LogOut, Radio, RefreshCw, Database, Filter, ChevronLeft, 
-  ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, Download, 
-  UserX, UserCheck, Trash2, Key, HelpCircle, Activity 
+  Shield, Users, MessageSquare, Search, LogOut, RefreshCw, Filter, 
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, 
+  Download, UserX, Activity 
 } from 'lucide-react';
-
-const COUNTRIES = [
-  { code: 'IN', name: 'India', flag: '🇮🇳' },
-  { code: 'US', name: 'United States', flag: '🇺🇸' },
-  { code: 'GB', name: 'United Kingdom', flag: '🇬🇧' },
-  { code: 'AE', name: 'UAE', flag: '🇦🇪' },
-  { code: 'CA', name: 'Canada', flag: '🇨🇦' }
-];
 
 const formatPhoneNumber = (phone) => {
   if (!phone) return '+91 98765 43210';
@@ -109,28 +100,7 @@ export default function AdminPortal() {
 
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
 
-  // Auto Refresh timer
-  useEffect(() => {
-    if (!token) return;
-    fetchStats();
-    fetchAuditLogs();
-    
-    let timer;
-    if (liveAutoRefresh) {
-      timer = setInterval(() => {
-        fetchStats();
-      }, 5000);
-    }
-    return () => clearInterval(timer);
-  }, [token, liveAutoRefresh]);
-
-  // Refetch users on pagination/filter changes
-  useEffect(() => {
-    if (!token) return;
-    fetchUsers();
-  }, [token, page, pageSize, sortBy, sortOrder, statusFilter]);
-
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const res = await fetch(`${apiBaseUrl}/api/admin/dashboard`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -142,9 +112,9 @@ export default function AdminPortal() {
     } catch (err) {
       console.error("Dashboard stats fetch failed:", err);
     }
-  };
+  }, [apiBaseUrl, token]);
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     try {
       const queryParams = new URLSearchParams({
         page: page.toString(),
@@ -168,9 +138,9 @@ export default function AdminPortal() {
     } catch (err) {
       console.error("Users list fetch failed:", err);
     }
-  };
+  }, [apiBaseUrl, token, page, pageSize, sortBy, sortOrder, searchTerm, statusFilter]);
 
-  const fetchAuditLogs = async () => {
+  const fetchAuditLogs = useCallback(async () => {
     try {
       const res = await fetch(`${apiBaseUrl}/api/admin/audit-logs`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -182,7 +152,40 @@ export default function AdminPortal() {
     } catch (err) {
       console.error("Audit logs fetch failed:", err);
     }
-  };
+  }, [apiBaseUrl, token]);
+
+  const fetchUsersRef = useRef(fetchUsers);
+  useEffect(() => {
+    fetchUsersRef.current = fetchUsers;
+  }, [fetchUsers]);
+
+  const fetchStatsRef = useRef(fetchStats);
+  const fetchAuditLogsRef = useRef(fetchAuditLogs);
+  useEffect(() => {
+    fetchStatsRef.current = fetchStats;
+    fetchAuditLogsRef.current = fetchAuditLogs;
+  }, [fetchStats, fetchAuditLogs]);
+
+  // Auto Refresh timer
+  useEffect(() => {
+    if (!token) return;
+    fetchStatsRef.current();
+    fetchAuditLogsRef.current();
+    
+    let timer;
+    if (liveAutoRefresh) {
+      timer = setInterval(() => {
+        fetchStatsRef.current();
+      }, 5000);
+    }
+    return () => clearInterval(timer);
+  }, [token, liveAutoRefresh]);
+
+  // Refetch users on pagination/filter changes
+  useEffect(() => {
+    if (!token) return;
+    fetchUsersRef.current();
+  }, [token, page, pageSize, sortBy, sortOrder, statusFilter]);
 
   const handleAdminLogin = async (e) => {
     e.preventDefault();

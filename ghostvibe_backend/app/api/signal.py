@@ -163,6 +163,10 @@ async def get_prekey_bundle(
     otp_res = await db.execute(otp_stmt)
     otp = otp_res.scalars().first()
     
+    if otp:
+        otp.is_used = True
+        await db.commit()
+    
     return PreKeyBundleResponse(
         identity_public_key=identity.identity_public_key,
         signing_public_key=identity.signing_public_key,

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Shield, Smartphone, KeyRound, ArrowRight, Loader2 } from 'lucide-react';
+import { Shield, KeyRound, ArrowRight, Loader2 } from 'lucide-react';
 import { generateLocalIdentityKeys, generatePreKeys } from '../utils/signal_crypto';
 import { initDatabase, saveRecord } from '../utils/indexed_db';
 import { validateOtpCode } from '../utils/validators';
@@ -36,10 +36,10 @@ export default function Auth({ onAuthSuccess }) {
     const fullE164 = `${selectedCountry.dial}${rawDigits}`;
     
     // Strict libphonenumber check
-    let isValid = false;
+    let isValid;
     try {
       const parsed = parsePhoneNumberFromString(fullE164);
-      isValid = parsed && parsed.isValid();
+      isValid = !!(parsed && parsed.isValid());
     } catch {
       isValid = false;
     }

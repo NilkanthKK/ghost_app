@@ -1,13 +1,21 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+
+// Language display options
+const LANGUAGES = [
+  { code: 'gu-IN', label: 'Gujarati (Gujarati)', short: 'gu' },
+  { code: 'en-US', label: 'English (US)', short: 'en' },
+  { code: 'hi-IN', label: 'Hindi (Hindi)', short: 'hi' },
+  { code: 'es-ES', label: 'Spanish (Espanol)', short: 'es' },
+  { code: 'fr-FR', label: 'French (Francais)', short: 'fr' }
+];
 import { 
   PhoneOff, Mic, MicOff, Video, VideoOff, Languages, Volume2, VolumeX,
-  Settings, Monitor, Play, Pause, Tv, Disc, Shield, ShieldAlert
+  Settings, Monitor, Play, Pause, Tv, Disc, ShieldAlert
 } from 'lucide-react';
 
 export default function VideoCall({ 
   callSession, // { peerId, role, phone_number, active }
   ws, 
-  userId, 
   onEndCall 
 }) {
   const [localStream, setLocalStream] = useState(null);
@@ -65,17 +73,10 @@ export default function VideoCall({
 
   const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080'; // Updated to match environment config
 
-  // Language display options
-  const LANGUAGES = [
-    { code: 'gu-IN', label: 'Gujarati (Gujarati)', short: 'gu' },
-    { code: 'en-US', label: 'English (US)', short: 'en' },
-    { code: 'hi-IN', label: 'Hindi (Hindi)', short: 'hi' },
-    { code: 'es-ES', label: 'Spanish (Espanol)', short: 'es' },
-    { code: 'fr-FR', label: 'French (Francais)', short: 'fr' }
-  ];
+
 
   // Enumerate active multimedia devices
-  const updateDeviceList = async () => {
+  const updateDeviceList = useCallback(async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audioIns = devices.filter(d => d.kind === 'audioinput');
@@ -92,7 +93,7 @@ export default function VideoCall({
     } catch (err) {
       console.warn("Failed to enumerate media devices:", err);
     }
-  };
+  }, [selectedMic, selectedCamera, selectedSpeaker]);
 
   // Hot swap audio inputs
   const handleMicChange = async (deviceId) => {
@@ -184,7 +185,7 @@ export default function VideoCall({
   };
 
   // ICE Restart for auto-renegotiation
-  const triggerIceRestart = () => {
+  const triggerIceRestart = useCallback(() => {
     if (!pcRef.current || pcRef.current.connectionState === 'closed') return;
     console.log("Triggering ICE restart renegotiation...");
     setConnectionState('reconnecting');
@@ -198,7 +199,7 @@ export default function VideoCall({
         }));
       })
       .catch(err => console.error("Failed to initiate ICE restart offer:", err));
-  };
+  }, [callSession.peerId, ws]);
 
   // Listen to browser network changes to trigger ICE restart
   useEffect(() => {
@@ -210,7 +211,7 @@ export default function VideoCall({
     return () => {
       window.removeEventListener('online', handleOnline);
     };
-  }, []);
+  }, [triggerIceRestart]);
 
   // Call Hold / Resume
   const toggleHoldCall = () => {
@@ -231,18 +232,10 @@ export default function VideoCall({
   };
 
   // Call Transfer foundation trigger
-  const initiateCallTransfer = (targetUserId) => {
-    if (!targetUserId) return;
-    console.log("Sending Call Transfer request to:", targetUserId);
-    ws.send(JSON.stringify({
-      type: 'call-transfer-request',
-      target_id: callSession.peerId,
-      data: { transfer_to: targetUserId }
-    }));
-  };
+
 
   // Subtitle & Voice Renderer on Remote Side (Speech Synthesis TTS)
-  function handleIncomingTranscript(text, translation, lang) {
+  const handleIncomingTranscript = useCallback((text, translation, lang) => {
     setSubtitleText(text);
     setSubtitleTranslation(translation);
     setShowSubtitle(true);
@@ -262,10 +255,10 @@ export default function VideoCall({
     subtitleTimeoutRef.current = setTimeout(() => {
       setShowSubtitle(false);
     }, 5000);
-  }
+  }, [ttsEnabled]);
 
   // Fallback utility to draw a simulated camera output
-  function createMockCanvasStream() {
+  const createMockCanvasStream = useCallback(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 640;
     canvas.height = 480;
@@ -311,10 +304,10 @@ export default function VideoCall({
     };
 
     return stream;
-  }
+  }, []);
 
   // E2EE WebRTC Data Channel Handling (Zero-Server Transcripts)
-  function setupDataChannel(channel) {
+  const setupDataChannel = useCallback((channel) => {
     dataChannelRef.current = channel;
     
     channel.onopen = () => console.log('WebRTC Data Channel established.');
@@ -327,10 +320,10 @@ export default function VideoCall({
       }
     };
     channel.onclose = () => console.log('WebRTC Data Channel closed.');
-  }
+  }, [handleIncomingTranscript]);
 
   // WebRTC Peer Connection Core Logic
-  function initializePeerConnection(stream) {
+  const initializePeerConnection = useCallback((stream) => {
     const configuration = {
       iceServers: [{ urls: import.meta.env.VITE_STUN_SERVER || 'stun:stun.l.google.com:19302' }]
     };
@@ -429,7 +422,7 @@ export default function VideoCall({
     pc.cleanSignaling = () => {
       ws.removeEventListener('message', handleSignaling);
     };
-  }
+  }, [callSession.role, callSession.peerId, ws, onEndCall, setupDataChannel, handleIncomingTranscript, triggerIceRestart]);
 
   // Gather stats and auto-adapt bitrate/resolution
   useEffect(() => {
@@ -510,7 +503,7 @@ export default function VideoCall({
   }, [remoteStream]);
 
   // Speech Recognition: Client-Side Speech-to-Text (STT)
-  function startSpeechRecognition() {
+  const startSpeechRecognition = useCallback(() => {
     if (recognitionRef.current) {
       recognitionRef.current.stop();
     }
@@ -594,7 +587,7 @@ export default function VideoCall({
     } catch (e) {
       console.error("Failed to start speech recognition:", e);
     }
-  }
+  }, [myLang, peerLang, backendUrl, ws, callSession.peerId, translationEnabled, micActive]);
 
   // Startup media capture
   useEffect(() => {
@@ -650,6 +643,7 @@ export default function VideoCall({
         recognitionRef.current.stop();
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Hot swap Speech Recognition
@@ -661,7 +655,7 @@ export default function VideoCall({
         recognitionRef.current.stop();
       }
     }
-  }, [myLang, translationEnabled, micActive, localStream]);
+  }, [myLang, translationEnabled, micActive, localStream, startSpeechRecognition]);
 
   // Mic toggling
   const toggleMic = () => {

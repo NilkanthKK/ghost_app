@@ -73,17 +73,32 @@ class ConnectionManager:
         """
         Broadcasts a message to all connected clients, optionally excluding one user.
         """
+        import asyncio
         payload = json.dumps(message)
-        disconnected = []
-        for user_id, websocket in self.active_connections.items():
+        
+        tasks = []
+        user_ids = []
+        
+        # Take a snapshot to avoid RuntimeError: dictionary changed size during iteration
+        connections_snapshot = list(self.active_connections.items())
+        
+        for user_id, websocket in connections_snapshot:
             if exclude_user_id and user_id == exclude_user_id:
                 continue
-            try:
-                await websocket.send_text(payload)
-            except Exception as e:
-                logger.error(f"Failed to broadcast to {user_id}: {e}")
-                disconnected.append(user_id)
+            tasks.append(websocket.send_text(payload))
+            user_ids.append(user_id)
+            
+        if not tasks:
+            return
+            
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         
+        disconnected = []
+        for user_id, result in zip(user_ids, results):
+            if isinstance(result, Exception):
+                logger.error(f"Failed to broadcast to {user_id}: {result}")
+                disconnected.append(user_id)
+                
         for user_id in disconnected:
             await self.disconnect(user_id)
 

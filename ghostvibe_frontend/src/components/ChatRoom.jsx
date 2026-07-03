@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Send, Phone, ShieldCheck, Languages, Paperclip, MoreVertical, Trash2, CheckSquare, Square, Clock } from 'lucide-react';
 import { encryptMessageLocal } from '../utils/signal_crypto';
 import MediaViewer from './MediaViewer';
-import ChatLockModal, { hashPin } from './ChatLockModal';
+import ChatLockModal from './ChatLockModal';
+import { hashPin } from '../utils/chat_lock';
 import { validateChatMessage, validateFileUpload } from '../utils/validators';
 
 // Vibe skin configurations
@@ -70,7 +71,7 @@ export default function ChatRoom({
   const [lockMode, setLockMode] = useState('setup');
   const [pinInput, setPinInput] = useState('');
   const [unlockError, setUnlockError] = useState('');
-  const [timeTicker, setTimeTicker] = useState(Date.now());
+  const [, setTimeTicker] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => {
       setTimeTicker(Date.now());

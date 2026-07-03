@@ -1,16 +1,16 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Auth from './components/Auth';
 import ChatList from './components/ChatList';
 import ChatRoom from './components/ChatRoom';
 import VideoCall from './components/VideoCall';
 import SettingsModal from './components/SettingsModal';
-import { ShieldCheck, PhoneCall, PhoneOff } from 'lucide-react';
+import { ShieldCheck, PhoneOff } from 'lucide-react';
 import { decryptMessageLocal } from './utils/signal_crypto';
 import { playSentChime, playReceivedChime, playVibeChime } from './utils/audio';
 import { addToQueue, processQueue, handleAck } from './utils/offline_manager';
 import { FEATURE_FLAGS } from './utils/flags';
 import { initDatabase, saveRecord, getRecord, clearStore, encryptData, decryptData } from './utils/indexed_db';
-import ChatLockModal, { hashPin } from './components/ChatLockModal';
+
 import { validateUsername, validateBio, validateFileUpload } from './utils/validators';
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080';
 const wsUrl = import.meta.env.VITE_WS_URL || '127.0.0.1:8080';
@@ -29,6 +29,12 @@ export default function App() {
   const [userId, setUserId] = useState(() => safeGetItem('gv_user_id'));
   const [myPhone, setMyPhone] = useState(() => safeGetItem('gv_phone_number'));
   const [reconnectCounter, setReconnectCounter] = useState(0);
+  const [isDbLoaded, setIsDbLoaded] = useState(false);
+  const [prevUserId, setPrevUserId] = useState(userId);
+  if (userId !== prevUserId) {
+    setPrevUserId(userId);
+    setIsDbLoaded(false);
+  }
   
   // Chats & Contacts
   // format: [{ user_id, phone_number, name, username_hash, identity_key_public, one_time_pre_key, messages: [...] }]
@@ -55,7 +61,6 @@ export default function App() {
   
   // Connection State: 'connecting' | 'connected' | 'disconnected'
   const [connectionState, setConnectionState] = useState('disconnected');
-  const [isDbLoaded, setIsDbLoaded] = useState(false);
 
   // Presence: { [userId]: { status: 'online'|'offline', last_active: ISOString } }
   const [presence, setPresence] = useState({});
@@ -109,219 +114,18 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const prefsLoadedRef = useRef(false);
 
-  const syncPreferencesToBackend = async (theme, lastSeen, ttl, profileData) => {
-    if (!token || !prefsLoadedRef.current) return;
-    try {
-      const activeProfile = profileData || myProfile;
-      const prefs = { theme, lastSeen, ttl, profile: activeProfile };
-      const encKey = getStorageKey();
-      const encryptedPrefs = await encryptData(prefs, encKey);
-      await fetch(`${apiBaseUrl}/api/user/preferences`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ 
-          encrypted_prefs: encryptedPrefs,
-          username: activeProfile?.username || '',
-          full_name: activeProfile?.username || '',
-          email: localStorage.getItem('gv_my_email') || ''
-        })
-      });
-    } catch (err) {
-      console.warn("Failed to backup preferences to backend:", err);
-    }
-  };
-
-  const loadPreferencesFromBackend = async (userToken) => {
-    try {
-      const response = await fetch(`${apiBaseUrl}/api/user/preferences`, {
-        headers: {
-          'Authorization': `Bearer ${userToken || token}`
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        const encryptedPrefs = data.encrypted_prefs;
-        if (encryptedPrefs) {
-          const encKey = getStorageKey();
-          const decrypted = await decryptData(encryptedPrefs, encKey);
-          if (decrypted) {
-            if (decrypted.theme) setGlobalTheme(decrypted.theme);
-            if (decrypted.lastSeen !== undefined) setLastSeenEnabled(decrypted.lastSeen === 'true' || decrypted.lastSeen === true);
-            if (decrypted.ttl !== undefined) setDefaultTtl(parseInt(decrypted.ttl, 10));
-            if (decrypted.profile) {
-              setMyProfile(decrypted.profile);
-              localStorage.setItem('gv_my_profile', JSON.stringify(decrypted.profile));
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.warn("Failed to load preferences from backend:", err);
-    } finally {
-      prefsLoadedRef.current = true;
-    }
-  };
-
-  // Fetch active linked devices on Settings open
-  useEffect(() => {
-    if (settingsOpen && token) {
-      fetch(`${apiBaseUrl}/api/v1/devices/list`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      .then(res => res.ok ? res.json() : [])
-      .then(data => setLinkedDevices(data))
-      .catch(err => console.warn("Failed to fetch linked devices:", err));
-    }
-  }, [settingsOpen, token]);
-
-  const handleRevokeDevice = async (deviceId) => {
-    try {
-      const res = await fetch(`${apiBaseUrl}/api/v1/devices/${deviceId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        setLinkedDevices(prev => prev.filter(d => d.device_id !== deviceId));
-      }
-    } catch (err) {
-      console.warn("Failed to revoke device:", err);
-    }
-  };
-
-  // Sync global theme to body class
-  useEffect(() => {
-    document.body.className = `theme-${globalTheme}`;
-    saveDualStorage('gv_global_theme', globalTheme);
-    syncPreferencesToBackend(globalTheme, lastSeenEnabled, defaultTtl);
-  }, [globalTheme]);
-
-  // Sync last seen privacy to localStorage
-  useEffect(() => {
-    saveDualStorage('gv_last_seen_enabled', lastSeenEnabled ? 'true' : 'false');
-    syncPreferencesToBackend(globalTheme, lastSeenEnabled, defaultTtl);
-  }, [lastSeenEnabled]);
-
-  // Sync default TTL to storage and backend
-  useEffect(() => {
-    saveDualStorage('gv_default_ttl', String(defaultTtl));
-    syncPreferencesToBackend(globalTheme, lastSeenEnabled, defaultTtl);
-  }, [defaultTtl]);
-
-  // References to bypass React stale closures in WebSocket event listeners
-  const chatsRef = useRef([]);
-  const activeChatIdRef = useRef(null);
-  const wsRef = useRef(null);
-
-  // Sync refs with state on updates
-  useEffect(() => {
-    chatsRef.current = chats;
-  }, [chats]);
-
-  useEffect(() => {
-    activeChatIdRef.current = activeChatId;
-  }, [activeChatId]);
-
-  // Sync vibes to local storage
-  useEffect(() => {
-    if (userId) {
-      saveDualStorage(`gv_vibes_${userId}`, chatVibes);
-    }
-  }, [chatVibes, userId]);
-
-  // Reconnect WebSocket on browser online event
-  useEffect(() => {
-    const handleOnline = () => {
-      console.log("Device back online. Reconnecting WebSocket...");
-      if (userId) {
-        setReconnectCounter(prev => prev + 1);
-      }
-    };
-    window.addEventListener('online', handleOnline);
-    return () => window.removeEventListener('online', handleOnline);
-  }, [userId]);
-
-  // Centralized interval to prune expired disappearing messages from state & DB
-  useEffect(() => {
-    if (!userId) return;
-    
-    const interval = setInterval(async () => {
-      let expiredFound = false;
-      const now = Date.now();
-      
-      setChats(prevChats => {
-        let changed = false;
-        const updated = prevChats.map(chat => {
-          const validMsgs = chat.messages.filter(m => {
-            if (m.expires_at) {
-              const expTime = new Date(m.expires_at).getTime();
-              if (expTime <= now) {
-                changed = true;
-                expiredFound = true;
-                return false;
-              }
-            }
-            return true;
-          });
-          if (validMsgs.length !== chat.messages.length) {
-            return { ...chat, messages: validMsgs };
-          }
-          return chat;
-        });
-        
-        if (changed) {
-          saveDualStorage(`gv_chats_${userId}`, updated);
-          return updated;
-        }
-        return prevChats;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [userId]);
-
-  // Listen for local expiry events from the offline queue manager
-  useEffect(() => {
-    if (!userId) return;
-    const handleLocalExpiryEvent = (e) => {
-      const msgId = e.detail.message_id;
-      setChats(prevChats => {
-        let changed = false;
-        const updated = prevChats.map(chat => {
-          const filtered = chat.messages.filter(m => {
-            if (m.id === msgId) {
-              changed = true;
-              return false;
-            }
-            return true;
-          });
-          return { ...chat, messages: filtered };
-        });
-        if (changed) {
-          saveDualStorage(`gv_chats_${userId}`, updated);
-          return updated;
-        }
-        return prevChats;
-      });
-    };
-    window.addEventListener('gv-message-expired', handleLocalExpiryEvent);
-    return () => window.removeEventListener('gv-message-expired', handleLocalExpiryEvent);
-  }, [userId]);
-
   // Resolve key inputs for cryptographic settings
-  function getStorageKey() {
+  const getStorageKey = useCallback(() => {
     return safeGetItem('gv_private_key') || safeGetItem('gv_phone_number') || 'ghostvibe_local_secure_fallback_key';
-  }
+  }, []);
 
   // Check if migration is finalized
-  function isMigrationCompleted() {
+  const isMigrationCompleted = useCallback(() => {
     return localStorage.getItem('gv_migration_completed') === 'true';
-  }
+  }, []);
 
   // Map localStorage key to IndexedDB store and record ID
-  function mapKeyToStore(storageKey) {
+  const mapKeyToStore = useCallback((storageKey) => {
     if (storageKey.startsWith('gv_chats_')) {
       return { storeName: 'messages', recordId: storageKey };
     }
@@ -335,19 +139,19 @@ export default function App() {
       return { storeName: 'preferences', recordId: storageKey };
     }
     return { storeName: 'cache', recordId: storageKey };
-  }
+  }, []);
 
-  function cleanOpenedViewOnce(chatsList) {
+  const cleanOpenedViewOnce = useCallback((chatsList) => {
     if (!Array.isArray(chatsList)) return chatsList;
     return chatsList.map(chat => {
       if (!chat.messages) return chat;
       const filtered = chat.messages.filter(m => !(m.view_once && m.opened));
       return { ...chat, messages: filtered };
     });
-  }
+  }, []);
 
   // Dual Storage Write: IndexedDB primary, localStorage fallback only
-  async function saveDualStorageImmediate(key, value) {
+  const saveDualStorageImmediate = useCallback(async (key, value) => {
     let success = false;
     let targetVal = value;
     if (key.startsWith('gv_chats_')) {
@@ -372,16 +176,16 @@ export default function App() {
       if (key.startsWith('gv_chats_') || key.startsWith('gv_statuses_') || key.startsWith('gv_vibes_')) {
         try {
           localStorage.removeItem(key);
-        } catch {}
+        } catch { /* ignore */ }
       }
     }
-  }
+  }, [getStorageKey, mapKeyToStore, cleanOpenedViewOnce]);
 
   const writeTimeoutRef = useRef({});
   const writeQueueRef = useRef({});
 
   // Debounced dual storage writer to batch DB transactions and avoid redundant encryption
-  function saveDualStorage(key, value) {
+  const saveDualStorage = useCallback((key, value) => {
     writeQueueRef.current[key] = value;
     
     if (writeTimeoutRef.current[key]) {
@@ -395,10 +199,10 @@ export default function App() {
       
       await saveDualStorageImmediate(key, latestValue);
     }, 500);
-  }
+  }, [saveDualStorageImmediate]);
 
   // Dual Storage Read: Try IndexedDB first, fallback to localStorage
-  async function getDualStorage(key) {
+  const getDualStorage = useCallback(async (key) => {
     try {
       const { storeName, recordId } = mapKeyToStore(key);
       const val = await getRecord(storeName, recordId, getStorageKey());
@@ -418,10 +222,10 @@ export default function App() {
       }
     }
     return null;
-  }
+  }, [getStorageKey, mapKeyToStore]);
 
   // Migrate existing localStorage data to IndexedDB
-  async function migrateLocalStorageToIndexedDB() {
+  const migrateLocalStorageToIndexedDB = useCallback(async () => {
     if (isMigrationCompleted()) {
       return;
     }
@@ -451,7 +255,198 @@ export default function App() {
     } catch (err) {
       console.warn("Migration failed:", err);
     }
-  }
+  }, [getStorageKey, isMigrationCompleted, mapKeyToStore]);
+
+  const syncPreferencesToBackend = useCallback(async (theme, lastSeen, ttl, profileData) => {
+    if (!token || !prefsLoadedRef.current) return;
+    try {
+      const activeProfile = profileData || myProfile;
+      const prefs = { theme, lastSeen, ttl, profile: activeProfile };
+      const encKey = getStorageKey();
+      const encryptedPrefs = await encryptData(prefs, encKey);
+      await fetch(`${apiBaseUrl}/api/user/preferences`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ 
+          encrypted_prefs: encryptedPrefs,
+          username: activeProfile?.username || '',
+          full_name: activeProfile?.username || '',
+          email: localStorage.getItem('gv_my_email') || ''
+        })
+      });
+    } catch (err) {
+      console.warn("Failed to backup preferences to backend:", err);
+    }
+  }, [token, myProfile, getStorageKey]);
+
+  const loadPreferencesFromBackend = useCallback(async (userToken) => {
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/user/preferences`, {
+        headers: {
+          'Authorization': `Bearer ${userToken || token}`
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const encryptedPrefs = data.encrypted_prefs;
+        if (encryptedPrefs) {
+          const encKey = getStorageKey();
+          const decrypted = await decryptData(encryptedPrefs, encKey);
+          if (decrypted) {
+            if (decrypted.theme) setGlobalTheme(decrypted.theme);
+            if (decrypted.lastSeen !== undefined) setLastSeenEnabled(decrypted.lastSeen === 'true' || decrypted.lastSeen === true);
+            if (decrypted.ttl !== undefined) setDefaultTtl(parseInt(decrypted.ttl, 10));
+            if (decrypted.profile) {
+              setMyProfile(decrypted.profile);
+              localStorage.setItem('gv_my_profile', JSON.stringify(decrypted.profile));
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to load preferences from backend:", err);
+    } finally {
+      prefsLoadedRef.current = true;
+    }
+  }, [token, getStorageKey]);
+
+  // Fetch active linked devices on Settings open
+  useEffect(() => {
+    if (settingsOpen && token) {
+      fetch(`${apiBaseUrl}/api/v1/devices/list`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setLinkedDevices(data))
+      .catch(err => console.warn("Failed to fetch linked devices:", err));
+    }
+  }, [settingsOpen, token]);
+
+  const handleRevokeDevice = async (deviceId) => {
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/v1/devices/${deviceId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setLinkedDevices(prev => prev.filter(d => d.device_id !== deviceId));
+      }
+    } catch (err) {
+      console.warn("Failed to revoke device:", err);
+    }
+  };
+
+  // Sync preferences to body class, local storage and backend
+  useEffect(() => {
+    document.body.className = `theme-${globalTheme}`;
+    saveDualStorage('gv_global_theme', globalTheme);
+    saveDualStorage('gv_last_seen_enabled', lastSeenEnabled ? 'true' : 'false');
+    saveDualStorage('gv_default_ttl', String(defaultTtl));
+    syncPreferencesToBackend(globalTheme, lastSeenEnabled, defaultTtl);
+  }, [globalTheme, lastSeenEnabled, defaultTtl, saveDualStorage, syncPreferencesToBackend]);
+
+  // References to bypass React stale closures in WebSocket event listeners
+  const chatsRef = useRef([]);
+  const activeChatIdRef = useRef(null);
+  const wsRef = useRef(null);
+
+  // Sync refs with state on updates
+  useEffect(() => {
+    chatsRef.current = chats;
+  }, [chats]);
+
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+
+  // Sync vibes to local storage
+  useEffect(() => {
+    if (userId) {
+      saveDualStorage(`gv_vibes_${userId}`, chatVibes);
+    }
+  }, [chatVibes, userId, saveDualStorage]);
+
+  // Reconnect WebSocket on browser online event
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log("Device back online. Reconnecting WebSocket...");
+      if (userId) {
+        setReconnectCounter(prev => prev + 1);
+      }
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [userId]);
+
+  // Centralized interval to prune expired disappearing messages from state & DB
+  useEffect(() => {
+    if (!userId) return;
+    
+    const interval = setInterval(async () => {
+      const now = Date.now();
+      
+      setChats(prevChats => {
+        let changed = false;
+        const updated = prevChats.map(chat => {
+          const validMsgs = chat.messages.filter(m => {
+            if (m.expires_at) {
+              const expTime = new Date(m.expires_at).getTime();
+              if (expTime <= now) {
+                changed = true;
+                return false;
+              }
+            }
+            return true;
+          });
+          if (validMsgs.length !== chat.messages.length) {
+            return { ...chat, messages: validMsgs };
+          }
+          return chat;
+        });
+        
+        if (changed) {
+          saveDualStorage(`gv_chats_${userId}`, updated);
+          return updated;
+        }
+        return prevChats;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [userId, saveDualStorage]);
+
+  // Listen for local expiry events from the offline queue manager
+  useEffect(() => {
+    if (!userId) return;
+    const handleLocalExpiryEvent = (e) => {
+      const msgId = e.detail.message_id;
+      setChats(prevChats => {
+        let changed = false;
+        const updated = prevChats.map(chat => {
+          const filtered = chat.messages.filter(m => {
+            if (m.id === msgId) {
+              changed = true;
+              return false;
+            }
+            return true;
+          });
+          return { ...chat, messages: filtered };
+        });
+        if (changed) {
+          saveDualStorage(`gv_chats_${userId}`, updated);
+          return updated;
+        }
+        return prevChats;
+      });
+    };
+    window.addEventListener('gv-message-expired', handleLocalExpiryEvent);
+    return () => window.removeEventListener('gv-message-expired', handleLocalExpiryEvent);
+  }, [userId, saveDualStorage]);
+
+
 
   // Change to 127.0.0.1 to avoid Windows IPv6 localhost connection blocking
   const backendUrl = wsUrl;
@@ -459,7 +454,6 @@ export default function App() {
   // Load chats & statuses from local cache on startup
   useEffect(() => {
     if (userId) {
-      setIsDbLoaded(false);
       async function initializeAndLoad() {
         // Initialize DB
         await initDatabase();
@@ -497,7 +491,7 @@ export default function App() {
       }
       initializeAndLoad();
     }
-  }, [userId]);
+  }, [userId, migrateLocalStorageToIndexedDB, loadPreferencesFromBackend, getDualStorage, saveDualStorage]);
 
   // Clean expired statuses
   function cleanExpiredStatuses(statusMap) {
@@ -1049,6 +1043,9 @@ export default function App() {
     }
   };
 
+  const handleWsEventRef = useRef(handleWsEvent);
+  handleWsEventRef.current = handleWsEvent;
+
   // Connect WebSocket and setup message handlers
   useEffect(() => {
     if (!userId || !token || !isDbLoaded) return;
@@ -1106,7 +1103,7 @@ export default function App() {
       try {
         const msg = JSON.parse(event.data);
         console.log('[Socket Event] Type:', msg.type);
-        handleWsEvent(msg);
+        handleWsEventRef.current(msg);
       } catch (err) {
         console.error('[Socket Error] Failed to parse socket message:', err);
       }
@@ -1140,7 +1137,7 @@ export default function App() {
       socket.close();
       setCurrentSocket(null);
     };
-  }, [userId, token, reconnectCounter, isDbLoaded]); // Reconnect if userId, token, reconnectCounter, or isDbLoaded changes
+  }, [userId, token, reconnectCounter, isDbLoaded, backendUrl]); // Reconnect if userId, token, reconnectCounter, or isDbLoaded changes
 
   // Send read receipts when a chat is opened
   useEffect(() => {
@@ -1177,7 +1174,7 @@ export default function App() {
         }
       }
     }
-  }, [activeChatId]);
+  }, [activeChatId, chats, userId, saveDualStorage]);
 
 ;
 

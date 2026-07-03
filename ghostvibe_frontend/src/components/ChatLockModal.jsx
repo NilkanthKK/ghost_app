@@ -1,16 +1,8 @@
-import React, { useState } from 'react';
-
-// Simple Web Crypto SHA-256 helper
-export async function hashPin(pin) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(pin);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
+import { useState } from 'react';
+import { hashPin } from '../utils/chat_lock';
 
 // Banking-level PIN strength validator
-export function validatePinInput(pin, myPhone) {
+function validatePinInput(pin, myPhone) {
   if (!/^\d{4,6}$/.test(pin)) {
     return 'PIN must be between 4 and 6 digits.';
   }
