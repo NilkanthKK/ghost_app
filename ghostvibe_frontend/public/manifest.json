@@ -1,0 +1,21 @@
+{
+  "short_name": "GhostVibe",
+  "name": "GhostVibe Protocol",
+  "icons": [
+    {
+      "src": "https://img.icons8.com/nolan/128/ghost.png",
+      "type": "image/png",
+      "sizes": "128x128"
+    },
+    {
+      "src": "https://img.icons8.com/nolan/256/ghost.png",
+      "type": "image/png",
+      "sizes": "256x256"
+    }
+  ],
+  "start_url": ".",
+  "background_color": "#090b11",
+  "theme_color": "#00e5ff",
+  "display": "standalone",
+  "orientation": "portrait"
+}

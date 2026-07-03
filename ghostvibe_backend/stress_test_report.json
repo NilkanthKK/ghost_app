@@ -1,0 +1,32 @@
+[
+  {
+    "user_count": 10,
+    "login_success_pct": 100.0,
+    "avg_login_latency_ms": 249.41915000017616,
+    "ws_connect_success_pct": 60.0,
+    "avg_ws_connect_ms": 25.190333333284798,
+    "total_messages": 30,
+    "avg_msg_latency_ms": 3.1199366666442074,
+    "throughput_msg_sec": 383.8049656669609
+  },
+  {
+    "user_count": 50,
+    "login_success_pct": 100.0,
+    "avg_login_latency_ms": 417.4720360000174,
+    "ws_connect_success_pct": 44.0,
+    "avg_ws_connect_ms": 42.319749999974604,
+    "total_messages": 105,
+    "avg_msg_latency_ms": 9.138400000015931,
+    "throughput_msg_sec": 10.292062967860495
+  },
+  {
+    "user_count": 100,
+    "login_success_pct": 100.0,
+    "avg_login_latency_ms": 731.1925059999885,
+    "ws_connect_success_pct": 37.0,
+    "avg_ws_connect_ms": 102.13945405411249,
+    "total_messages": 185,
+    "avg_msg_latency_ms": 32.427638378342365,
+    "throughput_msg_sec": 18.002713563612694
+  }
+]

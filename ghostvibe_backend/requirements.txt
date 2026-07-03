@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pydantic
+sqlalchemy[asyncio]
+asyncpg
+redis
+cryptography
+python-jose[cryptography]
+deep-translator
+python-dotenv

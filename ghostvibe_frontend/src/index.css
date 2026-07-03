@@ -1,0 +1,468 @@
+/* 
+  GhostVibe Protocol - Premium Glassmorphism Design System
+  Obsidian Dark Theme, Neon Cyan/Green Accents, Smooth Animations
+*/
+
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --bg-main: #090b11;
+  --bg-card: rgba(18, 22, 35, 0.65);
+  --bg-card-hover: rgba(26, 32, 50, 0.8);
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-glow: rgba(0, 229, 255, 0.2);
+  
+  /* Brand Palette */
+  --accent-cyan: #00e5ff;
+  --accent-green: #39ff14;
+  --accent-pink: #d500f9;
+  --text-primary: #ffffff;
+  --text-secondary: #90a4ae;
+  --text-muted: #546e7a;
+  
+  --shadow-glow: 0 0 20px rgba(0, 229, 255, 0.15);
+  --shadow-glow-green: 0 0 20px rgba(57, 255, 20, 0.15);
+  --glass-blur: blur(16px);
+  
+  font-family: 'Outfit', sans-serif;
+  color-scheme: dark;
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  background: radial-gradient(circle at 50% 0%, #151d30 0%, var(--bg-main) 70%);
+  min-height: 100vh;
+}
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Typography & Layouts */
+h1, h2, h3, h4, h5 {
+  font-weight: 600;
+  margin: 0 0 10px 0;
+  letter-spacing: -0.02em;
+}
+
+/* Glass Panels */
+.glass-panel {
+  background: var(--bg-card);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-panel:hover {
+  border-color: rgba(0, 229, 255, 0.2);
+}
+
+/* Premium Buttons */
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent-cyan), #00b0ff);
+  color: #000;
+  font-weight: 600;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+  box-shadow: var(--shadow-glow);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 30px rgba(0, 229, 255, 0.35);
+  background: linear-gradient(135deg, #33ebff, #33c0ff);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 12px 24px;
+  border-radius: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.btn-danger {
+  background: rgba(255, 23, 68, 0.2);
+  color: #ff1744;
+  border: 1px solid rgba(255, 23, 68, 0.3);
+  padding: 12px 24px;
+  border-radius: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.btn-danger:hover {
+  background: rgba(255, 23, 68, 0.3);
+  box-shadow: 0 0 20px rgba(255, 23, 68, 0.2);
+}
+
+/* Inputs */
+.input-field {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 12px 16px;
+  border-radius: 12px;
+  outline: none;
+  font-size: 1rem;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.input-field:focus {
+  border-color: var(--accent-cyan);
+  box-shadow: var(--shadow-glow);
+}
+
+/* Animation utilities */
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 15px rgba(0, 229, 255, 0.2); }
+  50% { box-shadow: 0 0 25px rgba(0, 229, 255, 0.4); }
+}
+
+.pulse-glow {
+  animation: pulseGlow 2s infinite ease-in-out;
+}
+
+/* Dashboard Layout */
+.app-container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  padding: 20px;
+  gap: 20px;
+}
+
+.sidebar {
+  width: 380px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.main-content {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Chat Item */
+.chat-item {
+  display: flex;
+  align-items: center;
+  padding: 16px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+  margin-bottom: 8px;
+}
+
+.chat-item:hover {
+  background: var(--bg-card-hover);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+.chat-item.active {
+  background: rgba(0, 229, 255, 0.08);
+  border-color: rgba(0, 229, 255, 0.2);
+}
+
+/* Video Grid and Call Subtitles */
+.video-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #000;
+}
+
+@media (min-width: 768px) {
+  .video-grid.dual {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr;
+  }
+}
+
+.video-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.video-container video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.local-video-pip {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  width: 180px;
+  height: 120px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 2px solid var(--accent-cyan);
+  box-shadow: var(--shadow-glow);
+  z-index: 10;
+}
+
+.call-subtitles-overlay {
+  position: absolute;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  padding: 12px 24px;
+  border-radius: 30px;
+  max-width: 80%;
+  text-align: center;
+  border: 1px solid var(--accent-cyan);
+  box-shadow: var(--shadow-glow);
+  animation: fadeIn 0.3s ease;
+  z-index: 20;
+}
+
+.call-subtitles-text {
+  font-size: 1.2rem;
+  font-weight: 500;
+  color: #fff;
+  line-height: 1.4;
+}
+
+.call-subtitles-translation {
+  font-size: 1rem;
+  color: var(--accent-green);
+  margin-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 4px;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translate(-50%, 10px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* Call Control Buttons Panel */
+.call-controls {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 16px;
+  z-index: 15;
+  background: rgba(18, 22, 35, 0.85);
+  backdrop-filter: blur(12px);
+  padding: 12px 24px;
+  border-radius: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.call-ctrl-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #fff;
+}
+
+.call-ctrl-btn.active {
+  background: var(--accent-cyan);
+  color: #000;
+}
+
+.call-ctrl-btn.inactive {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.call-ctrl-btn.danger {
+  background: #ff1744;
+}
+
+.call-ctrl-btn:hover {
+  transform: scale(1.1);
+}
+
+/* Hover Menu Actions for E2EE Messages */
+.message-bubble-wrapper:hover .msg-menu-btn {
+  opacity: 0.8 !important;
+}
+
+.message-bubble-wrapper .msg-menu-btn:hover {
+  opacity: 1 !important;
+  color: var(--accent-cyan) !important;
+}
+
+/* Contact List Item Delete Button Control */
+.chat-item .delete-contact-btn {
+  opacity: 0;
+  transition: all 0.2s ease;
+}
+
+.chat-item:hover .delete-contact-btn {
+  opacity: 0.6;
+}
+
+.chat-item .delete-contact-btn:hover {
+  opacity: 1 !important;
+  color: #ff1744 !important;
+  background: rgba(255, 23, 68, 0.15);
+}
+
+/* Status Carousel Tray hiding scrollbar */
+.status-tray {
+  scrollbar-width: none; /* Firefox */
+}
+.status-tray::-webkit-scrollbar {
+  display: none; /* Safari/Chrome */
+}
+
+/* Stories Ring Glow animations */
+@keyframes borderPulse {
+  0%, 100% { border-color: var(--accent-green); }
+  50% { border-color: #00e5ff; }
+}
+.status-ring-unseen {
+  animation: borderPulse 3s infinite ease-in-out;
+}
+
+/* Vibe Check burst particle animations */
+@keyframes floatBubble {
+  0% {
+    transform: translateY(0) scale(0.5) rotate(0deg);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.85;
+  }
+  90% {
+    opacity: 0.85;
+  }
+  100% {
+    transform: translateY(-90vh) scale(1.15) rotate(45deg);
+    opacity: 0;
+  }
+}
+
+.vibe-particle {
+  will-change: transform, opacity;
+}
+
+/* Bouncy message list entry */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Theme Overrides - Applied Globally to body */
+body.theme-chill {
+  --accent-cyan: #00e5ff;
+  --border-glow: rgba(0, 229, 255, 0.2);
+  --shadow-glow: 0 0 20px rgba(0, 229, 255, 0.15);
+  background: radial-gradient(circle at 50% 0%, #10192a 0%, #090b11 70%) !important;
+}
+
+body.theme-electric {
+  --accent-cyan: #39ff14;
+  --border-glow: rgba(57, 255, 20, 0.2);
+  --shadow-glow: 0 0 20px rgba(57, 255, 20, 0.15);
+  background: radial-gradient(circle at 50% 0%, #0f2214 0%, #060907 70%) !important;
+}
+
+body.theme-ghost {
+  --accent-cyan: #d500f9;
+  --border-glow: rgba(213, 0, 249, 0.2);
+  --shadow-glow: 0 0 20px rgba(213, 0, 249, 0.15);
+  background: radial-gradient(circle at 50% 0%, #200d27 0%, #0b050f 70%) !important;
+}
+
+body.theme-party {
+  --accent-cyan: #ff9100;
+  --border-glow: rgba(255, 145, 0, 0.2);
+  --shadow-glow: 0 0 20px rgba(255, 145, 0, 0.15);
+  background: radial-gradient(circle at 50% 0%, #27170a 0%, #0f0a05 70%) !important;
+}
+
+/* Voice Call Wave Animation */
+@keyframes voiceWave {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1.1); }
+}
+.voice-bar-anim {
+  animation: voiceWave 1.2s infinite ease-in-out;
+  transform-origin: bottom;
+}
+
+
+
