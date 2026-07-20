@@ -9,10 +9,15 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+import ssl
+
 # Determine if database is remote and requires SSL
 connect_args = {}
 if settings.DB_HOST not in ("localhost", "127.0.0.1", "db"):
-    connect_args = {"ssl": "require"}
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    connect_args = {"ssl": ssl_context}
 
 # Create the primary async engine for the ghostvibe database
 engine = create_async_engine(
