@@ -17,6 +17,18 @@ class ConnectionManager:
         """
         Accepts the WebSocket connection and registers the user session.
         """
+        if user_id in self.active_connections:
+            old_ws = self.active_connections[user_id]
+            logger.info(f"Duplicate connection detected for user {user_id}. Disconnecting old session.")
+            try:
+                await old_ws.send_text(json.dumps({
+                    "type": "logout-force",
+                    "reason": "Logged in from another device or location."
+                }))
+                await old_ws.close(code=1008, reason="Duplicate session")
+            except Exception as e:
+                logger.error(f"Failed to cleanly disconnect duplicate session: {e}")
+
         await websocket.accept()
         self.active_connections[user_id] = websocket
         logger.info(f"WebSocket session established for user: {user_id}. Active sessions: {len(self.active_connections)}")

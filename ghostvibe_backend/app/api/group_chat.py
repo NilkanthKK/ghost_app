@@ -153,25 +153,27 @@ async def invite_member(
                 detail="User is already a member of this group"
             )
             
-        # Add as member directly and log invite
-        new_member = GroupMember(
-            group_id=group_uuid,
-            user_id=invitee_uuid,
-            role="member"
+        # Check if already has a pending invite
+        invite_stmt = select(GroupInvite).where(
+            GroupInvite.group_id == group_uuid,
+            GroupInvite.invitee_id == invitee_uuid,
+            GroupInvite.status == "pending"
         )
-        db.add(new_member)
-        
+        invite_res = await db.execute(invite_stmt)
+        if invite_res.scalars().first():
+            return {"message": "User already has a pending invitation to this group."}
+
         invite_record = GroupInvite(
             group_id=group_uuid,
             invitee_id=invitee_uuid,
             invited_by=user_uuid,
-            status="accepted"
+            status="pending"
         )
         db.add(invite_record)
         await db.commit()
         
-        logger.info(f"User {payload.invitee_id} added to group {group_id} by {user_id}")
-        return {"message": "User invited and added successfully"}
+        logger.info(f"User {payload.invitee_id} invited to group {group_id} by {user_id}")
+        return {"message": "Invitation sent successfully"}
     except HTTPException:
         raise
     except Exception as e:
@@ -281,6 +283,180 @@ async def leave_group(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Transaction failed"
+        )
+
+class GroupInviteResponse(BaseModel):
+    invite_id: int
+    group_id: str
+    group_name: str
+    invited_by_phone: str
+    invited_by_username: str
+    created_at: str
+
+@router.get("", response_model=List[GroupResponse])
+async def list_my_groups(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    check_group_enabled()
+    user_uuid = uuid.UUID(user_id)
+    
+    # Find all groups where the user is a member
+    stmt = select(GroupMember.group_id).where(GroupMember.user_id == user_uuid)
+    res = await db.execute(stmt)
+    group_ids = res.scalars().all()
+    
+    groups_list = []
+    for g_id in group_ids:
+        # get details
+        g_stmt = select(Group).where(Group.group_id == g_id)
+        g_res = await db.execute(g_stmt)
+        group = g_res.scalars().first()
+        if group:
+            # get members
+            m_stmt = select(GroupMember).where(GroupMember.group_id == g_id)
+            m_res = await db.execute(m_stmt)
+            members = m_res.scalars().all()
+            
+            groups_list.append(GroupResponse(
+                group_id=str(group.group_id),
+                name=group.name,
+                avatar=group.avatar,
+                description=group.description,
+                created_by=str(group.created_by),
+                created_at=group.created_at.isoformat(),
+                members=[
+                    GroupMemberResponse(
+                        user_id=str(m.user_id),
+                        role=m.role,
+                        joined_at=m.joined_at.isoformat()
+                    )
+                    for m in members
+                ]
+            ))
+    return groups_list
+
+@router.get("/invites/pending", response_model=List[GroupInviteResponse])
+async def get_pending_invites(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    check_group_enabled()
+    user_uuid = uuid.UUID(user_id)
+    
+    stmt = select(GroupInvite).where(
+        GroupInvite.invitee_id == user_uuid,
+        GroupInvite.status == "pending"
+    )
+    res = await db.execute(stmt)
+    invites = res.scalars().all()
+    
+    out = []
+    for inv in invites:
+        # Get group details
+        g_stmt = select(Group).where(Group.group_id == inv.group_id)
+        g_res = await db.execute(g_stmt)
+        group = g_res.scalars().first()
+        if not group:
+            continue
+        # Get inviter details
+        u_stmt = select(User).where(User.user_id == inv.invited_by)
+        u_res = await db.execute(u_stmt)
+        inviter = u_res.scalars().first()
+        inviter_phone = inviter.phone_number if inviter else "Unknown"
+        inviter_name = inviter.username if inviter else "Unknown"
+        
+        out.append(GroupInviteResponse(
+            invite_id=inv.id,
+            group_id=str(inv.group_id),
+            group_name=group.name,
+            invited_by_phone=inviter_phone,
+            invited_by_username=inviter_name,
+            created_at=inv.created_at.isoformat()
+        ))
+    return out
+
+@router.post("/invites/{invite_id}/accept", status_code=status.HTTP_200_OK)
+async def accept_group_invite(
+    invite_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    check_group_enabled()
+    user_uuid = uuid.UUID(user_id)
+    
+    stmt = select(GroupInvite).where(
+        GroupInvite.id == invite_id,
+        GroupInvite.invitee_id == user_uuid,
+        GroupInvite.status == "pending"
+    )
+    res = await db.execute(stmt)
+    invite = res.scalars().first()
+    if not invite:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invite not found or already processed"
+        )
+        
+    try:
+        invite.status = "accepted"
+        
+        # Check if already a member
+        member_stmt = select(GroupMember).where(
+            GroupMember.group_id == invite.group_id,
+            GroupMember.user_id == user_uuid
+        )
+        m_res = await db.execute(member_stmt)
+        if not m_res.scalars().first():
+            new_member = GroupMember(
+                group_id=invite.group_id,
+                user_id=user_uuid,
+                role="member"
+            )
+            db.add(new_member)
+        
+        await db.commit()
+        return {"message": "Group invite accepted"}
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to accept invite: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to accept group invite"
+        )
+
+@router.post("/invites/{invite_id}/decline", status_code=status.HTTP_200_OK)
+async def decline_group_invite(
+    invite_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    check_group_enabled()
+    user_uuid = uuid.UUID(user_id)
+    
+    stmt = select(GroupInvite).where(
+        GroupInvite.id == invite_id,
+        GroupInvite.invitee_id == user_uuid,
+        GroupInvite.status == "pending"
+    )
+    res = await db.execute(stmt)
+    invite = res.scalars().first()
+    if not invite:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invite not found or already processed"
+        )
+        
+    try:
+        invite.status = "declined"
+        await db.commit()
+        return {"message": "Group invite declined"}
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to decline invite: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to decline group invite"
         )
 
 @router.get("/{group_id}", response_model=GroupResponse)

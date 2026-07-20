@@ -112,6 +112,9 @@ export default function App() {
     return saved ? parseInt(saved, 10) : 0;
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [encryptContactNames, setEncryptContactNames] = useState(() => safeGetItem('gv_encrypt_contact_names', 'false') === 'true');
+  const [pendingGroupInvites, setPendingGroupInvites] = useState([]);
+  const [activeGroupCalls, setActiveGroupCalls] = useState({});
   const prefsLoadedRef = useRef(false);
 
   // Resolve key inputs for cryptographic settings
@@ -257,11 +260,12 @@ export default function App() {
     }
   }, [getStorageKey, isMigrationCompleted, mapKeyToStore]);
 
-  const syncPreferencesToBackend = useCallback(async (theme, lastSeen, ttl, profileData) => {
+  const syncPreferencesToBackend = useCallback(async (theme, lastSeen, ttl, profileData, encNamesVal) => {
     if (!token || !prefsLoadedRef.current) return;
     try {
       const activeProfile = profileData || myProfile;
-      const prefs = { theme, lastSeen, ttl, profile: activeProfile };
+      const activeEncNames = encNamesVal !== undefined ? encNamesVal : encryptContactNames;
+      const prefs = { theme, lastSeen, ttl, profile: activeProfile, encryptContactNames: activeEncNames };
       const encKey = getStorageKey();
       const encryptedPrefs = await encryptData(prefs, encKey);
       await fetch(`${apiBaseUrl}/api/user/preferences`, {
@@ -280,7 +284,7 @@ export default function App() {
     } catch (err) {
       console.warn("Failed to backup preferences to backend:", err);
     }
-  }, [token, myProfile, getStorageKey]);
+  }, [token, myProfile, getStorageKey, encryptContactNames]);
 
   const loadPreferencesFromBackend = useCallback(async (userToken) => {
     try {
@@ -299,6 +303,11 @@ export default function App() {
             if (decrypted.theme) setGlobalTheme(decrypted.theme);
             if (decrypted.lastSeen !== undefined) setLastSeenEnabled(decrypted.lastSeen === 'true' || decrypted.lastSeen === true);
             if (decrypted.ttl !== undefined) setDefaultTtl(parseInt(decrypted.ttl, 10));
+            if (decrypted.encryptContactNames !== undefined) {
+              const activeVal = decrypted.encryptContactNames === 'true' || decrypted.encryptContactNames === true;
+              setEncryptContactNames(activeVal);
+              localStorage.setItem('gv_encrypt_contact_names', String(activeVal));
+            }
             if (decrypted.profile) {
               setMyProfile(decrypted.profile);
               localStorage.setItem('gv_my_profile', JSON.stringify(decrypted.profile));
@@ -339,19 +348,147 @@ export default function App() {
     }
   };
 
+  const fetchPendingGroupInvites = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/v1/groups/invites/pending`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPendingGroupInvites(data);
+      }
+    } catch (err) {
+      console.warn("Failed to fetch pending group invites:", err);
+    }
+  }, [token]);
+
+  const fetchMyGroups = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/v1/groups`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setChats(prev => {
+          const personalChats = prev.filter(c => !c.isGroup);
+          const groupChatsMapped = data.map(g => ({
+            user_id: g.group_id,
+            name: g.name,
+            isGroup: true,
+            description: g.description,
+            avatar: g.avatar,
+            created_by: g.created_by,
+            members: g.members,
+            messages: prev.find(c => c.user_id === g.group_id)?.messages || []
+          }));
+          const finalChats = [...personalChats, ...groupChatsMapped];
+          if (userId) {
+            saveDualStorage(`gv_chats_${userId}`, finalChats);
+          }
+          return finalChats;
+        });
+      }
+    } catch (err) {
+      console.warn("Failed to fetch groups:", err);
+    }
+  }, [token, userId, saveDualStorage]);
+
+  const handleAcceptGroupInvite = async (inviteId) => {
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/v1/groups/invites/${inviteId}/accept`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setPendingGroupInvites(prev => prev.filter(inv => inv.invite_id !== inviteId));
+        await fetchMyGroups();
+      }
+    } catch (err) {
+      console.warn("Failed to accept group invite:", err);
+    }
+  };
+
+  const handleDeclineGroupInvite = async (inviteId) => {
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/v1/groups/invites/${inviteId}/decline`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setPendingGroupInvites(prev => prev.filter(inv => inv.invite_id !== inviteId));
+      }
+    } catch (err) {
+      console.warn("Failed to decline group invite:", err);
+    }
+  };
+
+  const handleCreateGroup = async (groupName, description, membersList) => {
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/v1/groups/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: groupName,
+          description: description,
+          initial_members: membersList
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        for (const inviteeId of membersList) {
+          await fetch(`${apiBaseUrl}/api/v1/groups/${data.group_id}/invite`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ invitee_id: inviteeId })
+          });
+        }
+        await fetchMyGroups();
+        setActiveChatId(data.group_id);
+      } else {
+        const detail = await res.json();
+        alert(detail.detail || "Failed to create group");
+      }
+    } catch (err) {
+      console.warn("Failed to create group:", err);
+    }
+  };
+
   // Sync preferences to body class, local storage and backend
   useEffect(() => {
     document.body.className = `theme-${globalTheme}`;
     saveDualStorage('gv_global_theme', globalTheme);
     saveDualStorage('gv_last_seen_enabled', lastSeenEnabled ? 'true' : 'false');
     saveDualStorage('gv_default_ttl', String(defaultTtl));
-    syncPreferencesToBackend(globalTheme, lastSeenEnabled, defaultTtl);
-  }, [globalTheme, lastSeenEnabled, defaultTtl, saveDualStorage, syncPreferencesToBackend]);
+    saveDualStorage('gv_encrypt_contact_names', encryptContactNames ? 'true' : 'false');
+    syncPreferencesToBackend(globalTheme, lastSeenEnabled, defaultTtl, null, encryptContactNames);
+  }, [globalTheme, lastSeenEnabled, defaultTtl, encryptContactNames, saveDualStorage, syncPreferencesToBackend]);
+
+  // Periodic polling for group list and pending invitations
+  useEffect(() => {
+    if (userId && token) {
+      fetchPendingGroupInvites();
+      fetchMyGroups();
+      const interval = setInterval(() => {
+        fetchPendingGroupInvites();
+        fetchMyGroups();
+      }, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [userId, token, fetchPendingGroupInvites, fetchMyGroups]);
 
   // References to bypass React stale closures in WebSocket event listeners
   const chatsRef = useRef([]);
   const activeChatIdRef = useRef(null);
   const wsRef = useRef(null);
+  const isLoggedOutForceRef = useRef(false);
 
   // Sync refs with state on updates
   useEffect(() => {
@@ -467,7 +604,22 @@ export default function App() {
         try {
           const dbChats = await getDualStorage(`gv_chats_${userId}`);
           if (dbChats && Array.isArray(dbChats)) {
-            setChats(dbChats);
+            const cleaned = dbChats.map(c => {
+              if (c.name && c.name.startsWith("Node [") && c.name.endsWith("]")) {
+                return {
+                  ...c,
+                  name: (c.phone_number && !c.phone_number.startsWith("Node [")) ? c.phone_number : ""
+                };
+              }
+              if (c.phone_number && c.phone_number.startsWith("Node [") && c.phone_number.endsWith("]")) {
+                return {
+                  ...c,
+                  phone_number: c.user_id ? `+${c.user_id.substring(0, 6)}` : "Node"
+                };
+              }
+              return c;
+            });
+            setChats(cleaned);
           } else {
             setChats([]);
           }
@@ -485,13 +637,20 @@ export default function App() {
             await saveDualStorage(`gv_statuses_${userId}`, filtered);
           }
         } catch (err) {
-          console.error("Failed to load dual storage statuses:", err);
+          console.warn("Failed to load dual storage statuses:", err);
+        }
+
+        try {
+          await fetchMyGroups();
+          await fetchPendingGroupInvites();
+        } catch (err) {
+          console.warn("Failed initial group and invite fetch:", err);
         }
         setIsDbLoaded(true);
       }
       initializeAndLoad();
     }
-  }, [userId, migrateLocalStorageToIndexedDB, loadPreferencesFromBackend, getDualStorage, saveDualStorage]);
+  }, [userId, migrateLocalStorageToIndexedDB, loadPreferencesFromBackend, getDualStorage, saveDualStorage, fetchMyGroups, fetchPendingGroupInvites]);
 
   // Clean expired statuses
   function cleanExpiredStatuses(statusMap) {
@@ -541,13 +700,15 @@ export default function App() {
   };
 
   // Decrypt and process incoming messages
-  function handleIncomingMessage(senderId, messageData, customTimestamp = null) {
+  function handleIncomingMessage(senderId, messageData, customTimestamp = null, groupId = null, senderPhone = null, senderUsername = null) {
     const { id, msgType, encryptedBody } = messageData;
-    console.log('Rendering message', id);
+    console.log('Rendering message', id, 'group:', groupId);
     
     // Decrypt locally using private key
     const myPrivateKey = safeGetItem('gv_private_key');
     const decryptedText = decryptMessageLocal(encryptedBody, myPrivateKey);
+
+    const targetChatId = groupId || senderId;
 
     // 1. Send immediate delivery-ack back
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -558,7 +719,7 @@ export default function App() {
       }));
       
       // 2. Send read-ack too if the user currently has this chat open
-      if (activeChatIdRef.current === senderId) {
+      if (activeChatIdRef.current === targetChatId) {
         wsRef.current.send(JSON.stringify({
           type: 'read-ack',
           target_id: senderId,
@@ -572,7 +733,7 @@ export default function App() {
 
     // Trigger desktop notification
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
-      const chat = chatsRef.current.find(c => c.user_id === senderId);
+      const chat = chatsRef.current.find(c => c.user_id === targetChatId);
       const isLocked = chat && chat.locked;
       const title = isLocked ? "New Message" : (chat ? chat.name : "New Message");
       const body = isLocked ? "New Message" : (msgType === 'text' ? decryptedText : 'Sent a media file');
@@ -580,9 +741,9 @@ export default function App() {
     }
 
     // Reset lock timer for active chat
-    const chat = chatsRef.current.find(c => c.user_id === senderId);
-    if (chat && chat.locked && chat.lock_timeout > 0 && activeChatIdRef.current === senderId) {
-      refreshLockTimer(senderId, chat.lock_timeout);
+    const chat = chatsRef.current.find(c => c.user_id === targetChatId);
+    if (chat && chat.locked && chat.lock_timeout > 0 && activeChatIdRef.current === targetChatId) {
+      refreshLockTimer(targetChatId, chat.lock_timeout);
     }
 
     // Update message logs in target chat
@@ -593,10 +754,12 @@ export default function App() {
     const newMessage = {
       id,
       sender: 'peer',
+      sender_id: senderId,
+      sender_phone: senderPhone || chatsRef.current.find(c => c.user_id === senderId)?.phone_number || 'Group Member',
       text: msgType === 'text' ? decryptedText : '',
       msgType,
       mediaData: (msgType === 'image' || msgType === 'video') ? decryptedText : null, // Base64 decrypted media
-      status: activeChatIdRef.current === senderId ? 'read' : 'delivered',
+      status: activeChatIdRef.current === targetChatId ? 'read' : 'delivered',
       timestamp: customTimestamp || new Date().toISOString(),
       ttl,
       expires_at
@@ -608,7 +771,7 @@ export default function App() {
 
     setChats(prevChats => {
       const updatedChats = prevChats.map(chat => {
-        if (chat.user_id === senderId) {
+        if (chat.user_id === targetChatId) {
           return {
             ...chat,
             messages: [...chat.messages, newMessage]
@@ -618,36 +781,32 @@ export default function App() {
       });
 
       // Auto-create contact from incoming message if they aren't saved
-      const exists = prevChats.some(c => c.user_id === senderId);
-      if (!exists) {
+      const exists = prevChats.some(c => c.user_id === targetChatId);
+      if (!exists && groupId) {
+        setTimeout(() => fetchMyGroups(), 50);
+      }
+      if (!exists && !groupId) {
+        const phoneVal = senderPhone || `Node [${senderId.substring(0,6)}]`;
+        const nameVal = senderUsername || phoneVal;
         const newContact = {
-          phone_number: `Node [${senderId.substring(0,6)}]`,
-          name: `Node [${senderId.substring(0,6)}]`,
+          phone_number: phoneVal,
+          name: nameVal,
           user_id: senderId,
           username_hash: 'derived_' + Math.random().toString(36).substring(6),
           identity_key_public: 'injected_by_receiver',
           messages: [newMessage]
         };
-        
-        // Request initial presence
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({
-            type: 'presence-query',
-            target_id: senderId,
-            data: {}
-          }));
-        }
         const finalChats = [...prevChats, newContact];
         if (userId) {
           saveDualStorage(`gv_chats_${userId}`, finalChats);
         }
         return finalChats;
-      } else {
-        if (userId) {
-          saveDualStorage(`gv_chats_${userId}`, updatedChats);
-        }
-        return updatedChats;
       }
+
+      if (userId) {
+        saveDualStorage(`gv_chats_${userId}`, updatedChats);
+      }
+      return updatedChats;
     });
   }
 
@@ -777,9 +936,16 @@ export default function App() {
     if (!msg || !msg.type) return;
     
     switch (msg.type) {
+      case 'logout-force':
+        console.warn('Forced logout triggered by server:', msg.reason);
+        isLoggedOutForceRef.current = true;
+        alert(msg.reason || "This session was terminated because you logged in from another device.");
+        handleLogout();
+        break;
+
       case 'chat-message':
         console.log('[Message Received] Incoming chat message payload:', msg.data?.id);
-        handleIncomingMessage(msg.sender_id, msg.data, customTimestamp);
+        handleIncomingMessage(msg.sender_id, msg.data, customTimestamp, msg.group_id, msg.sender_phone, msg.sender_username);
         break;
 
       case 'message-sent': {
@@ -1017,6 +1183,22 @@ export default function App() {
         break;
       }
 
+      case 'group-call-state': {
+        const { group_id, participants } = msg.data;
+        setActiveGroupCalls(prev => {
+          if (!participants || participants.length === 0) {
+            const next = { ...prev };
+            delete next[group_id];
+            return next;
+          }
+          return {
+            ...prev,
+            [group_id]: participants
+          };
+        });
+        break;
+      }
+
       case 'call-offer': {
         const callerContact = chatsRef.current.find(c => c.user_id === msg.sender_id);
         const callerPhone = callerContact ? (callerContact.name || callerContact.phone_number) : 'Unknown secure node';
@@ -1111,15 +1293,15 @@ export default function App() {
 
     socket.onclose = (event) => {
       console.log('[Socket Closed] Connection dropped. Code:', event.code, 'Reason:', event.reason);
-      if (event.code === 1008) {
-        console.warn('[Socket Auth Error] Policy Violation. Logging out user.');
+      if (event.code === 1008 || isLoggedOutForceRef.current) {
+        console.warn('[Socket Auth Error] Policy Violation or forced logout. Logging out user.');
         handleLogout();
         return;
       }
       setConnectionState('disconnected');
       setCurrentSocket(null);
       setTimeout(() => {
-        if (userId && token) {
+        if (userId && token && !isLoggedOutForceRef.current) {
           setReconnectCounter(prev => prev + 1);
         }
       }, 3000);
@@ -1542,6 +1724,8 @@ export default function App() {
     }
   };
 
+
+
   // Initiate a Call
   const handleInitiateCall = (peerId) => {
     const contact = chats.find(c => c.user_id === peerId);
@@ -1554,11 +1738,28 @@ export default function App() {
     setCallSession({
       peerId,
       role: 'caller',
-      phone_number: contact ? (contact.name || contact.phone_number) : 'Secure Node',
+      phone_number: contact ? (encryptContactNames ? (contact.isGroup ? `🔒 Group-[${contact.user_id.substring(0, 6)}]` : `🔒 Node-[${contact.user_id.substring(0, 6)}]`) : (contact.name || contact.phone_number)) : 'Secure Node',
       callType,
-      active: true
+      active: true,
+      isGroup: contact?.isGroup || false,
+      groupId: contact?.isGroup ? contact.user_id : null,
+      members: contact?.isGroup ? contact.members : []
     });
     setCallTypeSelectionTarget(null);
+  };
+
+  const handleJoinGroupCall = (groupId) => {
+    const contact = chats.find(c => c.user_id === groupId);
+    setCallSession({
+      peerId: groupId,
+      role: 'joiner',
+      phone_number: contact ? (encryptContactNames ? `🔒 Group-[${contact.user_id.substring(0, 6)}]` : contact.name) : 'Group Call',
+      callType: 'video',
+      active: true,
+      isGroup: true,
+      groupId: groupId,
+      members: contact ? contact.members : []
+    });
   };
 
   // Accept incoming call
@@ -1630,6 +1831,7 @@ export default function App() {
   };
 
   const handleAuthSuccess = (uId, tok) => {
+    isLoggedOutForceRef.current = false;
     setUserId(uId);
     setToken(tok);
     let cachedPhone = '';
@@ -1646,6 +1848,35 @@ export default function App() {
   // Unauthenticated screen
   if (!userId || !token) {
     return <Auth onAuthSuccess={handleAuthSuccess} />;
+  }
+
+  if (!isDbLoaded) {
+    return (
+      <div style={{
+        height: '100vh',
+        width: '100vw',
+        background: 'radial-gradient(circle at 50% 0%, #10192a 0%, #090b11 70%)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#fff',
+        fontFamily: 'Inter, sans-serif'
+      }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+          <div className="animate-spin" style={{
+            width: '40px',
+            height: '40px',
+            borderRadius: '50%',
+            border: '3px solid rgba(0, 229, 255, 0.1)',
+            borderTopColor: 'var(--accent-cyan)'
+          }} />
+          <span style={{ color: 'var(--accent-cyan)', fontSize: '0.9rem', fontWeight: '500', letterSpacing: '0.05em' }}>
+            SECURING ENVIRONMENT...
+          </span>
+        </div>
+      </div>
+    );
   }
 
   const isProfileIncomplete = userId && token && (!myProfile || !myProfile.username);
@@ -1806,7 +2037,7 @@ export default function App() {
   }
 
   return (
-    <div className="app-container">
+    <div className={`app-container ${activeChatId ? 'has-active-chat' : ''}`}>
       {/* 1. Sidebar Contacts panel */}
       <div className="sidebar">
         {/* Device Profile info */}
@@ -1838,6 +2069,8 @@ export default function App() {
           unlockedChatIds={unlockedChatIds}
           onUnlockAllChats={handleUnlockAllChats}
           onStatusViewed={handleStatusViewed}
+          encryptContactNames={encryptContactNames}
+          onCreateGroup={handleCreateGroup}
         />
       </div>
 
@@ -1868,6 +2101,10 @@ export default function App() {
             unlockedChatIds={unlockedChatIds}
             onUnlockChat={handleUnlockChat}
             onSetChatLockSettings={handleSetChatLockSettings}
+            encryptContactNames={encryptContactNames}
+            activeGroupCalls={activeGroupCalls}
+            onJoinGroupCall={handleJoinGroupCall}
+            onBack={() => setActiveChatId(null)}
           />
         ) : (
           <div className="glass-panel" style={{
@@ -2028,6 +2265,11 @@ export default function App() {
           onRevokeDevice={handleRevokeDevice}
           myPhone={myPhone}
           myUserId={userId}
+          encryptContactNames={encryptContactNames}
+          setEncryptContactNames={setEncryptContactNames}
+          pendingGroupInvites={pendingGroupInvites}
+          onAcceptGroupInvite={handleAcceptGroupInvite}
+          onDeclineGroupInvite={handleDeclineGroupInvite}
         />
       )}
     </div>

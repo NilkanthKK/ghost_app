@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, Phone, ShieldCheck, Languages, Paperclip, MoreVertical, Trash2, CheckSquare, Square, Clock } from 'lucide-react';
+import { Send, Phone, ShieldCheck, Languages, Paperclip, MoreVertical, Trash2, CheckSquare, Square, Clock, ArrowLeft } from 'lucide-react';
 import { encryptMessageLocal } from '../utils/signal_crypto';
 import MediaViewer from './MediaViewer';
 import ChatLockModal from './ChatLockModal';
@@ -62,7 +62,11 @@ export default function ChatRoom({
   onMediaOpened,
   unlockedChatIds = new Set(),
   onUnlockChat,
-  onSetChatLockSettings
+  onSetChatLockSettings,
+  encryptContactNames,
+  activeGroupCalls = {},
+  onJoinGroupCall,
+  onBack
 }) {
   const [inputText, setInputText] = useState('');
   const [viewOnceEnabled, setViewOnceEnabled] = useState(false);
@@ -453,20 +457,48 @@ export default function ChatRoom({
         paddingBottom: '15px',
         zIndex: 20
       }}>
-        <div>
-          <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#fff' }}>{chat.name || chat.phone_number}</h3>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
-            <span style={{ 
-              fontSize: '0.75rem', 
-              color: presenceStatus.status === 'online' ? 'var(--accent-green)' : 'var(--text-secondary)',
-              fontWeight: presenceStatus.status === 'online' ? '500' : 'normal'
-            }}>
-              {formatPresence()}
-            </span>
-            <span style={{ color: 'var(--border-color)', fontSize: '0.8rem' }}>•</span>
-            <span style={{ fontSize: '0.75rem', color: activeTheme.color, display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: '500' }}>
-              <ShieldCheck size={13} /> {activeTheme.name} Vibe
-            </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {/* Back button for mobile responsiveness */}
+          <button 
+            className="mobile-back-btn"
+            onClick={onBack}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#fff',
+              cursor: 'pointer',
+              padding: '6px',
+              display: 'none',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(255,255,255,0.05)',
+              marginRight: '2px'
+            }}
+            title="Back to Chats"
+          >
+            <ArrowLeft size={18} />
+          </button>
+          
+          <div>
+            <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#fff' }}>
+              {encryptContactNames 
+                ? (chat.isGroup ? `🔒 Group-[${chat.user_id.substring(0, 6)}]` : `🔒 Node-[${chat.user_id.substring(0, 6)}]`)
+                : (chat.isGroup ? `👥 ${chat.name}` : (chat.name || chat.phone_number))}
+            </h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
+              <span style={{ 
+                fontSize: '0.75rem', 
+                color: (!chat.isGroup && presenceStatus.status === 'online') ? 'var(--accent-green)' : 'var(--text-secondary)',
+                fontWeight: (!chat.isGroup && presenceStatus.status === 'online') ? '500' : 'normal'
+              }}>
+                {chat.isGroup ? `${chat.members?.length || 0} participants` : formatPresence()}
+              </span>
+              <span style={{ color: 'var(--border-color)', fontSize: '0.8rem' }}>•</span>
+              <span style={{ fontSize: '0.75rem', color: activeTheme.color, display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: '500' }}>
+                <ShieldCheck size={13} /> {activeTheme.name} Vibe
+              </span>
+            </div>
           </div>
         </div>
         
@@ -587,7 +619,7 @@ export default function ChatRoom({
               value={translateTarget}
               onChange={(e) => setTranslateTarget(e.target.value)}
               style={{
-                background: 'transparent',
+                background: '#121623',
                 border: 'none',
                 color: 'var(--text-primary)',
                 outline: 'none',
@@ -595,10 +627,10 @@ export default function ChatRoom({
                 cursor: 'pointer'
               }}
             >
-              <option value="none">No Auto-Translate</option>
-              <option value="gu">Translate to Gujarati</option>
-              <option value="en">Translate to English</option>
-              <option value="hi">Translate to Hindi</option>
+              <option value="none" style={{ background: '#121623', color: '#fff' }}>No Auto-Translate</option>
+              <option value="gu" style={{ background: '#121623', color: '#fff' }}>Translate to Gujarati</option>
+              <option value="en" style={{ background: '#121623', color: '#fff' }}>Translate to English</option>
+              <option value="hi" style={{ background: '#121623', color: '#fff' }}>Translate to Hindi</option>
             </select>
           </div>
 
@@ -632,6 +664,46 @@ export default function ChatRoom({
           zIndex: 20
         }}>
           ⚠️ <strong>Self Vibe Mode:</strong> You are messaging your own device loopback terminal. Messages will loop back immediately.
+        </div>
+      )}
+
+      {/* Active Group Call Joining Banner */}
+      {chat.isGroup && activeGroupCalls[chat.user_id] && activeGroupCalls[chat.user_id].length > 0 && (
+        <div style={{
+          background: 'rgba(57, 255, 20, 0.08)',
+          border: '1px solid rgba(57, 255, 20, 0.2)',
+          padding: '12px 20px',
+          borderRadius: '12px',
+          color: 'var(--accent-green)',
+          fontSize: '0.85rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '8px',
+          zIndex: 20,
+          boxShadow: 'var(--shadow-glow-green)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '1.1rem' }}>📞</span>
+            <span>
+              <strong>Active Group Call:</strong> {activeGroupCalls[chat.user_id].length} participants are in this call.
+            </span>
+          </div>
+          <button 
+            className="btn-primary" 
+            style={{ 
+              padding: '6px 14px', 
+              fontSize: '0.8rem', 
+              background: 'linear-gradient(135deg, var(--accent-green), #00c853)',
+              boxShadow: '0 0 10px rgba(57,255,20,0.3)',
+              borderColor: 'rgba(57,255,20,0.5)'
+            }}
+            onClick={() => {
+              if (onJoinGroupCall) onJoinGroupCall(chat.user_id);
+            }}
+          >
+            Join Call
+          </button>
         </div>
       )}
 
@@ -806,6 +878,20 @@ export default function ChatRoom({
                       boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
                       transition: 'all 0.3s ease'
                     }}>
+                      {chat.isGroup && !isMe && (
+                        <div style={{ 
+                          fontSize: '0.75rem', 
+                          fontWeight: '700', 
+                          color: 'var(--accent-cyan)', 
+                          marginBottom: '4px',
+                          display: 'block' 
+                        }}>
+                          {encryptContactNames 
+                            ? `🔒 Node-[${msg.sender_id ? msg.sender_id.substring(0, 6) : 'unknown'}]` 
+                            : (msg.sender_phone || 'Group Participant')}
+                        </div>
+                      )}
+
                       {msg.view_once && !msg.deletedEveryone ? (
                         msg.opened ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-muted)' }}>

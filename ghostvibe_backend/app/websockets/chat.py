@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.offline import OfflineMessage
+from app.models.group_chat import GroupMember
 from app.core.flags import flags
 from app.database.session import async_session
 
@@ -22,6 +23,9 @@ active_expiries = {}
 
 # Set of view-once message IDs that have been opened/consumed
 opened_view_once_messages = set()
+
+# Active group calls tracking: { group_id_str: set(user_id_strs) }
+active_group_calls = {}
 
 async def run_expiry_timer(message_id: str, ttl: int, sender_id: str, recipient_id: str):
     try:
@@ -396,6 +400,58 @@ async def websocket_endpoint(
                         logger.error(f"Failed to queue offline media event {msg_type}: {e}")
                 continue
 
+            # Group call join/leave signaling
+            if msg_type == "group-call-join":
+                if target_id not in active_group_calls:
+                    active_group_calls[target_id] = set()
+                active_group_calls[target_id].add(user_id)
+                try:
+                    target_uuid = uuid.UUID(target_id)
+                    async with async_session() as db:
+                        stmt = select(GroupMember.user_id).where(GroupMember.group_id == target_uuid)
+                        res = await db.execute(stmt)
+                        members = res.scalars().all()
+                        
+                        state_packet = {
+                            "type": "group-call-state",
+                            "target_id": target_id,
+                            "data": {
+                                "group_id": target_id,
+                                "participants": list(active_group_calls[target_id])
+                            }
+                        }
+                        for m in members:
+                            await manager.send_personal_message(state_packet, str(m))
+                except Exception as e:
+                    logger.error(f"Error handling group-call-join: {e}")
+                continue
+
+            if msg_type == "group-call-leave":
+                if target_id in active_group_calls:
+                    active_group_calls[target_id].discard(user_id)
+                    if not active_group_calls[target_id]:
+                        active_group_calls.pop(target_id, None)
+                try:
+                    target_uuid = uuid.UUID(target_id)
+                    async with async_session() as db:
+                        stmt = select(GroupMember.user_id).where(GroupMember.group_id == target_uuid)
+                        res = await db.execute(stmt)
+                        members = res.scalars().all()
+                        
+                        state_packet = {
+                            "type": "group-call-state",
+                            "target_id": target_id,
+                            "data": {
+                                "group_id": target_id,
+                                "participants": list(active_group_calls.get(target_id, []))
+                            }
+                        }
+                        for m in members:
+                            await manager.send_personal_message(state_packet, str(m))
+                except Exception as e:
+                    logger.error(f"Error handling group-call-leave: {e}")
+                continue
+
             # Disappearing messages scheduling
             if msg_type in ("chat-message", "message-send"):
                 ttl = payload.get("ttl") if isinstance(payload, dict) else None
@@ -407,66 +463,172 @@ async def websocket_endpoint(
             # Map message-send to chat-message internally for backward compatibility
             actual_type = "chat-message" if msg_type == "message-send" else msg_type
 
+            # Get sender phone number / username
+            sender_phone = None
+            sender_username = None
+            try:
+                sender_uuid = uuid.UUID(user_id)
+                async with async_session() as db:
+                    from app.models.user import User
+                    stmt = select(User).where(User.user_id == sender_uuid)
+                    res = await db.execute(stmt)
+                    s_user = res.scalars().first()
+                    if s_user:
+                        sender_phone = s_user.phone_number
+                        sender_username = s_user.username
+            except Exception as e:
+                logger.error(f"Failed to query sender info: {e}")
+
             # Assemble direct routed packet
             routed_packet = {
                 "type": actual_type,
                 "sender_id": user_id,
+                "sender_phone": sender_phone,
+                "sender_username": sender_username,
                 "data": payload
             }
 
-            # Forward the message to the destination client
-            delivered = await manager.send_personal_message(routed_packet, target_id)
-            
-            # Send immediate send receipt confirmation back to the sender
-            sent_receipt = {
-                "type": "message-sent",
-                "target_id": target_id,
-                "data": {
-                    "client_message_id": payload.get("id"),
-                    "id": payload.get("id"),
-                    "recipient_id": target_id
+            # Check if target_id is a group
+            is_group = False
+            group_members = []
+            try:
+                target_uuid = uuid.UUID(target_id)
+                async with async_session() as db:
+                    stmt = select(GroupMember.user_id).where(GroupMember.group_id == target_uuid)
+                    res = await db.execute(stmt)
+                    group_members = res.scalars().all()
+                    if group_members:
+                        is_group = True
+            except Exception:
+                pass
+
+            if is_group:
+                group_routed_packet = {
+                    "type": actual_type,
+                    "sender_id": user_id,
+                    "sender_phone": sender_phone,
+                    "sender_username": sender_username,
+                    "group_id": target_id,
+                    "data": payload
                 }
-            }
-            await manager.send_personal_message(sent_receipt, user_id)
-            
-            # If target is offline, notify the sender / queue if offline sync is enabled
-            if not delivered:
-                if actual_type in ("chat-message", "delete-everyone", "delivery-ack", "read-ack", "vibe-update") and flags.OFFLINE_QUEUE_ENABLED:
-                    try:
-                        async with async_session() as db:
-                            await queue_offline_message(user_id, target_id, routed_packet, db)
-                        
-                        if actual_type == "chat-message":
-                            queued_receipt = {
-                                "type": "message-queued",
-                                "data": {
-                                    "client_message_id": payload.get("id"),
-                                    "id": payload.get("id"),
-                                    "status": "queued"
-                                }
-                            }
-                            await manager.send_personal_message(queued_receipt, user_id)
-                        logger.info(f"Routed event of type {actual_type} to user {target_id} queued in offline database.")
-                    except Exception as e:
-                        logger.error(f"Failed to write offline message queue: {e}")
-                        if actual_type == "chat-message":
-                            err_receipt = {
-                                "type": "error",
-                                "code": "DB_WRITE_FAIL"
-                            }
-                            await manager.send_personal_message(err_receipt, user_id)
-                else:
-                    receipt = {
-                        "type": "delivery-receipt",
-                        "status": "offline",
-                        "target_id": target_id,
-                        "original_type": msg_type
+                any_delivered = False
+                for member_id in group_members:
+                    member_id_str = str(member_id)
+                    if member_id_str == user_id:
+                        continue
+                    
+                    delivered = await manager.send_personal_message(group_routed_packet, member_id_str)
+                    if delivered:
+                        any_delivered = True
+                    else:
+                        if actual_type in ("chat-message", "delete-everyone", "delivery-ack", "read-ack", "vibe-update") and flags.OFFLINE_QUEUE_ENABLED:
+                            try:
+                                async with async_session() as db:
+                                    await queue_offline_message(user_id, member_id_str, group_routed_packet, db)
+                            except Exception as e:
+                                logger.error(f"Failed to queue group message for offline user {member_id_str}: {e}")
+                
+                # Send immediate send receipt confirmation back to the sender
+                sent_receipt = {
+                    "type": "message-sent",
+                    "target_id": target_id,
+                    "data": {
+                        "client_message_id": payload.get("id"),
+                        "id": payload.get("id"),
+                        "recipient_id": target_id
                     }
-                    await manager.send_personal_message(receipt, user_id)
-                    logger.info(f"Target user {target_id} offline. Delivery failed for type {msg_type}")
+                }
+                await manager.send_personal_message(sent_receipt, user_id)
+                
+                if not any_delivered and actual_type == "chat-message" and flags.OFFLINE_QUEUE_ENABLED:
+                    queued_receipt = {
+                        "type": "message-queued",
+                        "data": {
+                            "client_message_id": payload.get("id"),
+                            "id": payload.get("id"),
+                            "status": "queued"
+                        }
+                    }
+                    await manager.send_personal_message(queued_receipt, user_id)
+            else:
+                # Forward the message to the destination client
+                delivered = await manager.send_personal_message(routed_packet, target_id)
+                
+                # Send immediate send receipt confirmation back to the sender
+                sent_receipt = {
+                    "type": "message-sent",
+                    "target_id": target_id,
+                    "data": {
+                        "client_message_id": payload.get("id"),
+                        "id": payload.get("id"),
+                        "recipient_id": target_id
+                    }
+                }
+                await manager.send_personal_message(sent_receipt, user_id)
+                
+                # If target is offline, notify the sender / queue if offline sync is enabled
+                if not delivered:
+                    if actual_type in ("chat-message", "delete-everyone", "delivery-ack", "read-ack", "vibe-update") and flags.OFFLINE_QUEUE_ENABLED:
+                        try:
+                            async with async_session() as db:
+                                await queue_offline_message(user_id, target_id, routed_packet, db)
+                            
+                            if actual_type == "chat-message":
+                                queued_receipt = {
+                                    "type": "message-queued",
+                                    "data": {
+                                        "client_message_id": payload.get("id"),
+                                        "id": payload.get("id"),
+                                        "status": "queued"
+                                    }
+                                }
+                                await manager.send_personal_message(queued_receipt, user_id)
+                            logger.info(f"Routed event of type {actual_type} to user {target_id} queued in offline database.")
+                        except Exception as e:
+                            logger.error(f"Failed to write offline message queue: {e}")
+                            if actual_type == "chat-message":
+                                err_receipt = {
+                                    "type": "error",
+                                    "code": "DB_WRITE_FAIL"
+                                }
+                                await manager.send_personal_message(err_receipt, user_id)
+                    else:
+                        receipt = {
+                            "type": "delivery-receipt",
+                            "status": "offline",
+                            "target_id": target_id,
+                            "original_type": msg_type
+                        }
+                        await manager.send_personal_message(receipt, user_id)
+                        logger.info(f"Target user {target_id} offline. Delivery failed for type {msg_type}")
 
     except WebSocketDisconnect:
         await manager.disconnect(user_id)
+        # Clean up user from active group calls
+        for g_id, participants in list(active_group_calls.items()):
+            if user_id in participants:
+                participants.discard(user_id)
+                try:
+                    target_uuid = uuid.UUID(g_id)
+                    async with async_session() as db:
+                        stmt = select(GroupMember.user_id).where(GroupMember.group_id == target_uuid)
+                        res = await db.execute(stmt)
+                        members = res.scalars().all()
+                        state_packet = {
+                            "type": "group-call-state",
+                            "target_id": g_id,
+                            "data": {
+                                "group_id": g_id,
+                                "participants": list(participants)
+                            }
+                        }
+                        for m in members:
+                            await manager.send_personal_message(state_packet, str(m))
+                except Exception:
+                    pass
+                if not participants:
+                    active_group_calls.pop(g_id, None)
+
     except Exception as e:
         logger.error(f"WebSocket error for user {user_id}: {e}")
         await manager.disconnect(user_id)

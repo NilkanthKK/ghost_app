@@ -464,5 +464,48 @@ body.theme-party {
   transform-origin: bottom;
 }
 
+/* Mobile Responsiveness Media Queries */
+@media (max-width: 768px) {
+  .app-container {
+    padding: 10px !important;
+    gap: 0 !important;
+  }
+  
+  .app-container.has-active-chat .sidebar {
+    display: none !important;
+  }
+  
+  .app-container:not(.has-active-chat) .main-content {
+    display: none !important;
+  }
+  
+  .sidebar {
+    width: 100% !important;
+  }
+  
+  .mobile-back-btn {
+    display: flex !important;
+  }
+  
+  /* Make settings responsive */
+  .glass-panel.pulse-glow {
+    max-width: 95vw !important;
+    height: 90vh !important;
+    flex-direction: column !important;
+  }
+  
+  .glass-panel.pulse-glow > div:first-child {
+    width: 100% !important;
+    border-right: none !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+    padding: 15px !important;
+    height: auto !important;
+  }
+  
+  .glass-panel.pulse-glow > div:last-child {
+    padding: 20px !important;
+  }
+}
+
 
 

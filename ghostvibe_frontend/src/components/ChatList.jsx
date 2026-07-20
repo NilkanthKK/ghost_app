@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { MessageSquarePlus, Trash2, LogOut, Search, Plus, X, User, Volume2, VolumeX, Settings } from 'lucide-react';
+import { MessageSquarePlus, Trash2, LogOut, Search, Plus, X, User, Users, Volume2, VolumeX, Settings } from 'lucide-react';
 import { getSoundEnabled, setSoundEnabled, playSentChime } from '../utils/audio';
 import { getRecord } from '../utils/indexed_db';
 import { hashPin } from '../utils/chat_lock';
@@ -24,11 +24,17 @@ export default function ChatList({
   lastSeenEnabled,
   unlockedChatIds = new Set(),
   onStatusViewed,
-  onUnlockAllChats
+  onUnlockAllChats,
+  encryptContactNames,
+  onCreateGroup
 }) {
   const [newPhone, setNewPhone] = useState('');
   const [newName, setNewName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [groupDesc, setGroupDesc] = useState('');
+  const [selectedGroupMembers, setSelectedGroupMembers] = useState([]);
 
 
 
@@ -155,8 +161,26 @@ export default function ChatList({
 
   const handleAddSubmit = async (e) => {
     e.preventDefault();
-    const phoneVal = newPhone.trim();
+    let phoneVal = newPhone.trim().replace(/[\s-()]/g, '');
     if (!phoneVal) return;
+
+    if (!phoneVal.startsWith('+')) {
+      let dialCode = '+91';
+      if (myPhone && myPhone.startsWith('+')) {
+        const prefixes = ['+91', '+1', '+44', '+971', '+61', '+49', '+65'];
+        const matched = prefixes.find(p => myPhone.startsWith(p));
+        if (matched) {
+          dialCode = matched;
+        }
+      }
+      
+      const dialDigits = dialCode.replace('+', '');
+      if (phoneVal.startsWith(dialDigits) && phoneVal.length > dialDigits.length + 5) {
+        phoneVal = '+' + phoneVal;
+      } else {
+        phoneVal = dialCode + phoneVal;
+      }
+    }
     
     setLoading(true);
     setError('');
@@ -196,6 +220,18 @@ export default function ChatList({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCreateGroupSubmit = (e) => {
+    e.preventDefault();
+    if (!groupName.trim()) return;
+    if (onCreateGroup) {
+      onCreateGroup(groupName.trim(), groupDesc.trim(), selectedGroupMembers);
+    }
+    setShowCreateGroup(false);
+    setGroupName('');
+    setGroupDesc('');
+    setSelectedGroupMembers([]);
   };
 
   const formatLastActive = (isoString) => {
@@ -301,7 +337,7 @@ export default function ChatList({
     if (query) {
       if (isLocked) return false;
       const nameMatch = chat.name ? chat.name.toLowerCase().includes(query) : false;
-      const phoneMatch = chat.phone_number.includes(query);
+      const phoneMatch = chat.phone_number ? chat.phone_number.includes(query) : false;
       return nameMatch || phoneMatch;
     }
     return true;
@@ -354,16 +390,29 @@ export default function ChatList({
       gap: '15px'
     }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <h2 style={{ fontSize: '1.4rem', color: 'var(--accent-cyan)', marginBottom: '2px' }}>Vibes</h2>
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        flexWrap: 'wrap', 
+        gap: '10px',
+        borderBottom: '1px solid var(--border-color)',
+        paddingBottom: '12px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <h2 style={{ fontSize: '1.4rem', color: 'var(--accent-cyan)', margin: 0 }}>Vibes</h2>
           {renderConnectionBadge()}
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
           <button 
             className="btn-secondary" 
             style={{ 
-              padding: '8px', 
+              width: '32px',
+              height: '32px',
+              padding: 0, 
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               borderRadius: '50%', 
               color: soundOn ? 'var(--accent-cyan)' : 'var(--text-muted)',
               borderColor: soundOn ? 'rgba(0, 229, 255, 0.2)' : 'var(--border-color)'
@@ -371,31 +420,81 @@ export default function ChatList({
             onClick={handleToggleSound}
             title={soundOn ? "Mute Sounds" : "Unmute Sounds"}
           >
-            {soundOn ? <Volume2 size={20} /> : <VolumeX size={20} />}
+            {soundOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
           </button>
           <button 
             className="btn-secondary" 
-            style={{ padding: '8px', borderRadius: '50%' }}
+            style={{ 
+              width: '32px',
+              height: '32px',
+              padding: 0, 
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '50%' 
+            }}
             onClick={onOpenSettings}
-            title="Protocol Settings"
+            title="Settings"
           >
-            <Settings size={20} />
+            <Settings size={16} />
           </button>
           <button 
             className="btn-secondary" 
-            style={{ padding: '8px', borderRadius: '50%' }}
-            onClick={() => setShowAdd(!showAdd)}
+            style={{ 
+              width: '32px',
+              height: '32px',
+              padding: 0, 
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '50%' 
+            }}
+            onClick={() => {
+              setShowCreateGroup(!showCreateGroup);
+              setShowAdd(false);
+            }}
+            title="Create Group Chat"
+          >
+            <Users size={16} />
+          </button>
+          <button 
+            className="btn-secondary" 
+            style={{ 
+              width: '32px',
+              height: '32px',
+              padding: 0, 
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '50%' 
+            }}
+            onClick={() => {
+              setShowAdd(!showAdd);
+              setShowCreateGroup(false);
+            }}
             title="Start Secure Chat"
           >
-            <MessageSquarePlus size={20} />
+            <MessageSquarePlus size={16} />
           </button>
           <button 
             className="btn-danger" 
-            style={{ padding: '8px', borderRadius: '50%' }}
-            onClick={onLogout}
+            style={{ 
+              width: '32px',
+              height: '32px',
+              padding: 0, 
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '50%' 
+            }}
+            onClick={() => {
+              if (window.confirm("Are you sure you want to disconnect this device? All local chat logs and security keys will be permanently deleted from this browser.")) {
+                onLogout();
+              }
+            }}
             title="Disconnect Device"
           >
-            <LogOut size={20} />
+            <LogOut size={16} />
           </button>
         </div>
       </div>
@@ -413,11 +512,11 @@ export default function ChatList({
         }}>
           <div>
             <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-              Contact Name (Alias)
+              Contact Name
             </label>
             <input
               type="text"
-              placeholder="e.g. Papa, Bhai"
+              placeholder="Name Here"
               className="input-field"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -429,7 +528,7 @@ export default function ChatList({
             </label>
             <input
               type="tel"
-              placeholder="e.g. +91 87654 32109"
+              placeholder="Enter mobile number (e.g. +91 9876543210)..."
               className="input-field"
               value={newPhone}
               onChange={(e) => setNewPhone(e.target.value)}
@@ -453,6 +552,103 @@ export default function ChatList({
             </button>
           </div>
           {error && <span style={{ color: '#ff5252', fontSize: '0.75rem', marginTop: '2px' }}>{error}</span>}
+        </form>
+      )}
+
+      {/* Create group chat prompt */}
+      {showCreateGroup && (
+        <form onSubmit={handleCreateGroupSubmit} style={{
+          background: 'rgba(0,0,0,0.2)',
+          padding: '16px',
+          borderRadius: '12px',
+          border: '1px solid var(--border-color)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px'
+        }}>
+          <div>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+              Group Name
+            </label>
+            <input
+              type="text"
+              placeholder="Enter group name..."
+              className="input-field"
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+              Description
+            </label>
+            <input
+              type="text"
+              placeholder="Enter group description..."
+              className="input-field"
+              value={groupDesc}
+              onChange={(e) => setGroupDesc(e.target.value)}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+              Select Members
+            </label>
+            <div style={{
+              maxHeight: '100px',
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+              background: 'rgba(0,0,0,0.3)',
+              padding: '8px',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color)'
+            }}>
+              {localChats.filter(c => !c.isGroup).map(contact => {
+                const isSelected = selectedGroupMembers.includes(contact.user_id);
+                return (
+                  <label key={contact.user_id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => {
+                        if (isSelected) {
+                          setSelectedGroupMembers(prev => prev.filter(id => id !== contact.user_id));
+                        } else {
+                          setSelectedGroupMembers(prev => [...prev, contact.user_id]);
+                        }
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    {contact.name || contact.phone_number}
+                  </label>
+                );
+              })}
+              {localChats.filter(c => !c.isGroup).length === 0 && (
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No contacts available.</div>
+              )}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+            <button type="submit" className="btn-primary" style={{ flex: 1, padding: '10px', fontSize: '0.85rem', justifyContent: 'center' }}>
+              Create Group
+            </button>
+            <button 
+              type="button" 
+              className="btn-secondary" 
+              style={{ padding: '10px', fontSize: '0.85rem' }} 
+              onClick={() => {
+                setShowCreateGroup(false);
+                setGroupName('');
+                setGroupDesc('');
+                setSelectedGroupMembers([]);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
         </form>
       )}
 
@@ -651,7 +847,7 @@ export default function ChatList({
                   width: '44px',
                   height: '44px',
                   borderRadius: '50%',
-                  background: getDeterministicGradient(chat.phone_number),
+                  background: getDeterministicGradient(chat.phone_number || chat.user_id),
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -659,8 +855,8 @@ export default function ChatList({
                   color: '#fff',
                   position: 'relative'
                 }}>
-                  <User size={22} />
-                  {isOnline && lastSeenEnabled && !isCurrentlyLocked && (
+                  {chat.isGroup ? <Users size={22} /> : <User size={22} />}
+                  {isOnline && lastSeenEnabled && !isCurrentlyLocked && !chat.isGroup && (
                     <div className="pulse-glow" style={{
                       position: 'absolute',
                       bottom: '0',
@@ -693,13 +889,19 @@ export default function ChatList({
                     }}>
                       {isCurrentlyLocked 
                         ? "🔒 Locked Chat" 
-                        : (chat.name ? chat.name : chat.phone_number)}
+                        : (encryptContactNames
+                          ? (chat.isGroup ? `🔒 Group-[${chat.user_id.substring(0, 6)}]` : `🔒 Node-[${chat.user_id.substring(0, 6)}]`)
+                          : (chat.isGroup ? `👥 ${chat.name}` : (chat.name ? chat.name : chat.phone_number)))}
                     </span>
                     <span style={{ 
                       fontSize: '0.65rem', 
-                      color: isOnline ? 'var(--accent-green)' : 'var(--text-muted)' 
+                      color: chat.isGroup ? 'var(--accent-cyan)' : (isOnline ? 'var(--accent-green)' : 'var(--text-muted)') 
                     }}>
-                      {!isCurrentlyLocked && (isOnline && lastSeenEnabled ? 'Online' : (lastSeenEnabled ? formatLastActive(chatPresence.last_active) : 'Offline'))}
+                      {!isCurrentlyLocked && (
+                        chat.isGroup 
+                          ? `${chat.members?.length || 0} members`
+                          : (isOnline && lastSeenEnabled ? 'Online' : (lastSeenEnabled ? formatLastActive(chatPresence.last_active) : 'Offline'))
+                      )}
                     </span>
                   </div>
                   

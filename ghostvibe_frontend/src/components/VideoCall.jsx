@@ -16,13 +16,17 @@ import {
 export default function VideoCall({ 
   callSession, // { peerId, role, phone_number, active }
   ws, 
-  onEndCall 
+  onEndCall,
+  userId
 }) {
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
   const [micActive, setMicActive] = useState(true);
   const [videoActive, setVideoActive] = useState(true);
   const [ttsEnabled, setTtsEnabled] = useState(true);
+  
+  const activeTargetPeerIdRef = useRef(callSession.peerId);
+  const callRoleRef = useRef(callSession.role);
   
   // Device Selection States
   const [audioInputs, setAudioInputs] = useState([]);
@@ -348,7 +352,7 @@ export default function VideoCall({
       if (event.candidate && ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
           type: 'ice-candidate',
-          target_id: callSession.peerId,
+          target_id: activeTargetPeerIdRef.current,
           data: event.candidate
         }));
       }
@@ -361,29 +365,70 @@ export default function VideoCall({
       }
     };
 
-    if (callSession.role === 'caller') {
-      const dataChannel = pc.createDataChannel('translation');
-      setupDataChannel(dataChannel);
-
-      pc.createOffer().then(offer => {
-        return pc.setLocalDescription(offer);
-      }).then(() => {
-        ws.send(JSON.stringify({
-          type: 'call-offer',
-          target_id: callSession.peerId,
-          data: pc.localDescription
-        }));
-      }).catch(err => console.error('Failed to create offer:', err));
+    if (callSession.isGroup) {
+      ws.send(JSON.stringify({
+        type: 'group-call-join',
+        target_id: callSession.groupId
+      }));
     } else {
-      pc.ondatachannel = (event) => {
-        setupDataChannel(event.channel);
-      };
+      if (callSession.role === 'caller') {
+        const dataChannel = pc.createDataChannel('translation');
+        setupDataChannel(dataChannel);
+
+        pc.createOffer().then(offer => {
+          return pc.setLocalDescription(offer);
+        }).then(() => {
+          ws.send(JSON.stringify({
+            type: 'call-offer',
+            target_id: callSession.peerId,
+            data: pc.localDescription
+          }));
+        }).catch(err => console.error('Failed to create offer:', err));
+      } else {
+        pc.ondatachannel = (event) => {
+          setupDataChannel(event.channel);
+        };
+      }
     }
 
     const handleSignaling = (event) => {
       try {
         const msg = JSON.parse(event.data);
-        if (msg.sender_id !== callSession.peerId) return;
+        
+        if (msg.type === 'group-call-state') {
+          const { participants } = msg.data;
+          const others = participants.filter(id => id !== userId);
+          if (others.length > 0) {
+            const target = others[0];
+            if (activeTargetPeerIdRef.current !== target) {
+              console.log("Group call: targeting peer", target);
+              activeTargetPeerIdRef.current = target;
+              const role = userId < target ? 'caller' : 'receiver';
+              callRoleRef.current = role;
+              
+              if (role === 'caller') {
+                const dataChannel = pc.createDataChannel('translation');
+                setupDataChannel(dataChannel);
+                pc.createOffer().then(offer => {
+                  return pc.setLocalDescription(offer);
+                }).then(() => {
+                  ws.send(JSON.stringify({
+                    type: 'call-offer',
+                    target_id: target,
+                    data: pc.localDescription
+                  }));
+                }).catch(err => console.error('Failed to create offer in group call:', err));
+              } else {
+                pc.ondatachannel = (event) => {
+                  setupDataChannel(event.channel);
+                };
+              }
+            }
+          }
+          return;
+        }
+
+        if (msg.sender_id !== activeTargetPeerIdRef.current) return;
 
         if (msg.type === 'call-answer') {
           pc.setRemoteDescription(new RTCSessionDescription(msg.data))
@@ -395,7 +440,7 @@ export default function VideoCall({
             .then(() => {
               ws.send(JSON.stringify({
                 type: 'call-answer',
-                target_id: callSession.peerId,
+                target_id: activeTargetPeerIdRef.current,
                 data: pc.localDescription
               }));
             })
@@ -422,7 +467,7 @@ export default function VideoCall({
     pc.cleanSignaling = () => {
       ws.removeEventListener('message', handleSignaling);
     };
-  }, [callSession.role, callSession.peerId, ws, onEndCall, setupDataChannel, handleIncomingTranscript, triggerIceRestart]);
+  }, [callSession.role, callSession.peerId, callSession.isGroup, callSession.groupId, userId, ws, onEndCall, setupDataChannel, handleIncomingTranscript, triggerIceRestart]);
 
   // Gather stats and auto-adapt bitrate/resolution
   useEffect(() => {
@@ -633,6 +678,12 @@ export default function VideoCall({
     setupMedia();
 
     return () => {
+      if (callSession.isGroup && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'group-call-leave',
+          target_id: callSession.groupId
+        }));
+      }
       if (activeStream) {
         activeStream.getTracks().forEach(track => track.stop());
       }

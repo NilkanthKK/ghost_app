@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { User, Download, Camera } from 'lucide-react';
+import { User, Download, Camera, X } from 'lucide-react';
 import { validateUsername, validateBio, validateEmail } from '../utils/validators';
 
 export default function SettingsModal({
@@ -9,7 +9,12 @@ export default function SettingsModal({
   linkedDevices,
   onRevokeDevice,
   myPhone,
-  myUserId
+  myUserId,
+  encryptContactNames,
+  setEncryptContactNames,
+  pendingGroupInvites = [],
+  onAcceptGroupInvite,
+  onDeclineGroupInvite
 }) {
   const [activeSubTab, setActiveSubTab] = useState('profile');
 
@@ -202,8 +207,41 @@ export default function SettingsModal({
         boxShadow: 'var(--shadow-glow)',
         display: 'flex',
         borderRadius: '20px',
-        overflow: 'hidden'
+        overflow: 'hidden',
+        position: 'relative'
       }}>
+        {/* Close/Back Button */}
+        <button 
+          onClick={onClose}
+          style={{
+            position: 'absolute',
+            top: '20px',
+            right: '20px',
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '50%',
+            width: '36px',
+            height: '36px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--text-secondary)',
+            cursor: 'pointer',
+            zIndex: 99999,
+            transition: 'all 0.2s ease'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = '#fff';
+            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = 'var(--text-secondary)';
+            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+          }}
+          title="Back to Chats"
+        >
+          <X size={18} />
+        </button>
         
         {/* Left tabs selector */}
         <div style={{
@@ -216,7 +254,7 @@ export default function SettingsModal({
           gap: '8px'
         }}>
           <h3 style={{ margin: '0 0 20px 0', paddingLeft: '12px', fontSize: '1.2rem', color: 'var(--accent-cyan)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            ⚙️ settings
+            ⚙️ Settings
           </h3>
 
           {[
@@ -224,8 +262,9 @@ export default function SettingsModal({
             { id: 'privacy', label: '🔒 Privacy', color: '#ff9100' },
             { id: 'security', label: '🛡️ Security', color: '#39ff14' },
             { id: 'notifications', label: '🔔 Notifications', color: '#d500f9' },
-            { id: 'chats', label: '💬 Chats Style', color: '#00e5ff' },
-            { id: 'storage', label: '💾 Storage & Data', color: '#eab308' }
+            { id: 'chats', label: '💬 Chats', color: '#00e5ff' },
+            { id: 'storage', label: '💾 Storage and Data', color: '#eab308' },
+            { id: 'invites', label: `👥 Invites${pendingGroupInvites.length > 0 ? ` (${pendingGroupInvites.length})` : ''}`, color: '#ff5252' }
           ].map(tab => (
             <button
               key={tab.id}
@@ -442,6 +481,19 @@ export default function SettingsModal({
                   </select>
                 </div>
 
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(0,0,0,0.2)', padding: '14px 16px', borderRadius: '12px', border: '1px solid var(--border-color)', marginTop: '5px' }}>
+                  <div>
+                    <span style={{ display: 'block', fontSize: '0.85rem', color: '#fff', fontWeight: 600 }}>Mask Contact Names</span>
+                    <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>Obscure contact names and phone numbers with secure cryptographic codes</span>
+                  </div>
+                  <input 
+                    type="checkbox" 
+                    checked={encryptContactNames} 
+                    onChange={(e) => setEncryptContactNames(e.target.checked)} 
+                    style={{ width: '18px', height: '18px', cursor: 'pointer' }} 
+                  />
+                </div>
+
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', marginTop: '10px' }}>
                   <div>
                     <span style={{ display: 'block', fontSize: '0.85rem', color: '#fff', fontWeight: 600 }}>Blocked Contacts</span>
@@ -621,6 +673,65 @@ export default function SettingsModal({
                     Clear
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* GROUP INVITES SUB TAB */}
+          {activeSubTab === 'invites' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', textAlign: 'left' }}>
+              <h2 style={{ margin: 0, fontSize: '1.4rem', color: '#fff' }}>Pending Group Invitations</h2>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                Review and accept invitations to join secure E2EE group chat rooms.
+              </p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>
+                {pendingGroupInvites.map(inv => (
+                  <div key={inv.invite_id} style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    background: 'rgba(255,255,255,0.02)',
+                    padding: '14px 18px',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-color)'
+                  }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <span style={{ fontSize: '0.95rem', fontWeight: '600', color: '#fff' }}>
+                        {inv.group_name}
+                      </span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        Invited by: {inv.invited_by_username} ({inv.invited_by_phone})
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <button 
+                        onClick={() => onAcceptGroupInvite(inv.invite_id)}
+                        className="btn-primary" 
+                        style={{ padding: '6px 12px', fontSize: '0.8rem', background: 'linear-gradient(135deg, var(--accent-green), #00c853)', border: 'none' }}
+                      >
+                        Accept
+                      </button>
+                      <button 
+                        onClick={() => onDeclineGroupInvite(inv.invite_id)}
+                        className="btn-secondary" 
+                        style={{ padding: '6px 12px', fontSize: '0.8rem', color: '#ff5252', borderColor: 'rgba(255,82,82,0.2)' }}
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {pendingGroupInvites.length === 0 && (
+                  <div style={{
+                    textAlign: 'center',
+                    padding: '40px 20px',
+                    color: 'var(--text-muted)',
+                    fontSize: '0.85rem'
+                  }}>
+                    No pending invitations.
+                  </div>
+                )}
               </div>
             </div>
           )}
