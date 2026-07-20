@@ -9,11 +9,17 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Determine if database is remote and requires SSL
+connect_args = {}
+if settings.DB_HOST not in ("localhost", "127.0.0.1", "db"):
+    connect_args = {"ssl": "require"}
+
 # Create the primary async engine for the ghostvibe database
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
     future=True,
+    connect_args=connect_args
 )
 
 # Async session maker
@@ -34,7 +40,7 @@ async def init_db() -> None:
     system_url = settings.DATABASE_URL_SYSTEM
     
     # We create a temporary engine with AUTOCOMMIT to run CREATE DATABASE
-    sys_engine = create_async_engine(system_url, isolation_level="AUTOCOMMIT")
+    sys_engine = create_async_engine(system_url, isolation_level="AUTOCOMMIT", connect_args=connect_args)
     
     async with sys_engine.connect() as conn:
         # Check if the database exists
