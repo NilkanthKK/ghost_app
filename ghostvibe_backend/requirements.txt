@@ -8,3 +8,4 @@ cryptography
 python-jose[cryptography]
 deep-translator
 python-dotenv
+phonenumbers
