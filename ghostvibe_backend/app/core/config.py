@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 # Resolve absolute path to .env file at the backend root directory
 env_path = Path(__file__).resolve().parent.parent.parent / '.env'
-load_dotenv(dotenv_path=env_path, override=True)
+load_dotenv(dotenv_path=env_path, override=False)
 
 class Settings:
     PROJECT_NAME: str = "GhostVibe Protocol"
