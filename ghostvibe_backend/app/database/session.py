@@ -39,24 +39,31 @@ async def init_db() -> None:
     # Connect to the system database 'postgres' to run the check/create
     system_url = settings.DATABASE_URL_SYSTEM
     
-    # We create a temporary engine with AUTOCOMMIT to run CREATE DATABASE
-    sys_engine = create_async_engine(system_url, isolation_level="AUTOCOMMIT", connect_args=connect_args)
-    
-    async with sys_engine.connect() as conn:
-        # Check if the database exists
-        result = await conn.execute(
-            text(f"SELECT 1 FROM pg_database WHERE datname='{db_name}'")
-        )
-        exists = result.scalar()
+    # Only check/create database locally (managed DBs like Render have it pre-created)
+    if settings.DB_HOST in ("localhost", "127.0.0.1", "db"):
+        # We create a temporary engine with AUTOCOMMIT to run CREATE DATABASE
+        sys_engine = create_async_engine(system_url, isolation_level="AUTOCOMMIT", connect_args=connect_args)
         
-        if not exists:
-            logger.info(f"Database '{db_name}' not found. Creating it dynamically...")
-            await conn.execute(text(f"CREATE DATABASE {db_name}"))
-            logger.info(f"Database '{db_name}' created successfully.")
-        else:
-            logger.info(f"Database '{db_name}' already exists.")
-            
-    await sys_engine.dispose()
+        try:
+            async with sys_engine.connect() as conn:
+                # Check if the database exists
+                result = await conn.execute(
+                    text(f"SELECT 1 FROM pg_database WHERE datname='{db_name}'")
+                )
+                exists = result.scalar()
+                
+                if not exists:
+                    logger.info(f"Database '{db_name}' not found. Creating it dynamically...")
+                    await conn.execute(text(f"CREATE DATABASE {db_name}"))
+                    logger.info(f"Database '{db_name}' created successfully.")
+                else:
+                    logger.info(f"Database '{db_name}' already exists.")
+        except Exception as e:
+            logger.warn(f"Auto database check skipped/failed: {e}")
+        finally:
+            await sys_engine.dispose()
+    else:
+        logger.info(f"Using pre-created remote database '{db_name}' on host '{settings.DB_HOST}'.")
 
     # Now import models dynamically to register them with Base metadata
     from app.models.user import User
